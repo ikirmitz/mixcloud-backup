@@ -3,9 +3,9 @@ import re
 import json
 import requests
 from pathlib import Path
-from mutagen.id3 import ID3
+from mutagen import File
 
-GRAPHQL_URL = "https://www.mixcloud.com/graphql"
+GRAPHQL_URL = "https://app.mixcloud.com/graphql"
 
 QUERY = """
 query Tracklist($lookup: CloudcastLookup!) {
@@ -21,7 +21,7 @@ query Tracklist($lookup: CloudcastLookup!) {
 """
 
 def extract_lookup(url: str):
-    m = re.search(r"mixcloud\\.com/([^/]+)/([^/]+)/?", url)
+    m = re.search(r"mixcloud\.com/([^/]+)/([^/]+)/?", url)
     if not m:
         return None, None
     return m.group(1), m.group(2)
@@ -32,14 +32,49 @@ def fmt(sec):
     return f"[{m:02d}:{s:05.2f}]"
 
 def process_mp3(mp3_path: Path):
-    tags = ID3(mp3_path)
-    purl = tags.get("WPUB") or tags.get("WOAS") or tags.get("WXXX:purl")
-
-    if not purl:
-        print(f"Skipping (no podcast URL): {mp3_path}")
+    audio = File(mp3_path)
+    if audio is None or audio.tags is None:
+        print(f"Skipping (no tags): {mp3_path}")
         return
 
-    url = str(purl.url)
+    # Get audio duration in seconds
+    audio_duration = audio.info.length if hasattr(audio.info, 'length') else None
+
+    tags = audio.tags
+    purl = None
+    url = None
+
+    # Try different tag formats to find the Mixcloud URL
+    # Check for TXXX:purl (ID3v2 user-defined text frame) - most common
+    if "TXXX:purl" in tags:
+        purl = tags["TXXX:purl"]
+        url = str(purl.text[0]) if hasattr(purl, 'text') and purl.text else str(purl)
+    # Check for simple 'purl' tag (MP4/M4A format)
+    elif "purl" in tags:
+        purl = tags["purl"]
+        url = str(purl[0]) if isinstance(purl, list) else str(purl)
+    # Check for WXXX:purl (ID3v2 user-defined URL frame)
+    elif "WXXX:purl" in tags:
+        purl = tags["WXXX:purl"]
+        url = str(purl.url) if hasattr(purl, 'url') else str(purl)
+    # Check for ID3v2 WPUB frame
+    elif "WPUB" in tags:
+        purl = tags["WPUB"]
+        url = str(purl.url) if hasattr(purl, 'url') else str(purl)
+    # Check for ID3v2 WOAS frame
+    elif "WOAS" in tags:
+        purl = tags["WOAS"]
+        url = str(purl.url) if hasattr(purl, 'url') else str(purl)
+    # Check comment field as fallback
+    elif "comment" in tags:
+        comment = tags["comment"]
+        comment_str = str(comment[0]) if isinstance(comment, list) else str(comment)
+        if "mixcloud.com" in comment_str:
+            url = comment_str
+
+    if not url:
+        print(f"Skipping (no podcast URL): {mp3_path}")
+        return
     user, slug = extract_lookup(url)
 
     if not user or not slug:
@@ -53,8 +88,31 @@ def process_mp3(mp3_path: Path):
         "variables": {"lookup": {"username": user, "slug": slug}}
     })
 
+    if resp.status_code != 200:
+        print(f"API error: HTTP {resp.status_code}")
+        return
+
     data = resp.json()
     sections = data["data"]["cloudcastLookup"]["sections"]
+
+    # Count sections (both chapters and tracks) - skip if less than 2
+    section_count = len(sections)
+    if section_count < 2:
+        print(f"Skipping (only {section_count} section(s)): {mp3_path}")
+        return
+
+    # Count sections with valid timing
+    timed_sections = [s for s in sections if s.get('startSeconds') is not None]
+
+    # If no timing info but we have audio duration, calculate evenly-spaced timestamps
+    if len(timed_sections) < 2 and audio_duration:
+        print(f"No timing data - calculating evenly-spaced timestamps over {int(audio_duration/60)}:{int(audio_duration%60):02d}")
+        interval = audio_duration / len(sections)
+        for i, s in enumerate(sections):
+            s['startSeconds'] = i * interval
+    elif len(timed_sections) < 2:
+        print(f"Skipping (no timing information and no audio duration): {mp3_path}")
+        return
 
     lrc_path = mp3_path.with_suffix(".lrc")
 
