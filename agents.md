@@ -238,7 +238,7 @@ Files are skipped with informative messages for:
 
 ### Usage
 ```bash
-python src/mixcloud_match_to_lrc.py [directory]
+uv run python src/mixcloud_match_to_lrc.py [directory]
 ```
 
 **Arguments**:
@@ -246,11 +246,17 @@ python src/mixcloud_match_to_lrc.py [directory]
 
 **Examples**:
 ```bash
-python src/mixcloud_match_to_lrc.py                    # Process current directory
-python src/mixcloud_match_to_lrc.py /path/to/podcasts  # Process specific directory
+uv run python src/mixcloud_match_to_lrc.py                    # Process current directory
+uv run python src/mixcloud_match_to_lrc.py /path/to/podcasts  # Process specific directory
 ```
 
 ## Dependencies
+
+### Package Management
+This project uses **uv** for dependency management. Install dependencies with:
+```bash
+uv sync
+```
 
 ### Required Packages
 - **mutagen** ≥ 1.47.0: Multimedia tagging library (reads MP3, MP4, FLAC, etc.)

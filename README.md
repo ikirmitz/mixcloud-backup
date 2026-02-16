@@ -11,6 +11,7 @@ This tool reads your Mixcloud podcast MP3 files and generates `.lrc` files (the 
 ### Prerequisites
 
 - Python 3.12 or higher
+- [uv](https://docs.astral.sh/uv/) - Fast Python package installer
 - MP3 files with Mixcloud URLs in their metadata
 
 ### Installation
@@ -20,8 +21,8 @@ This tool reads your Mixcloud podcast MP3 files and generates `.lrc` files (the 
 git clone <repository-url>
 cd mixcloud-lrc
 
-# Install dependencies
-pip install mutagen requests
+# Install dependencies using uv
+uv sync
 ```
 
 ### Usage
@@ -29,13 +30,13 @@ pip install mutagen requests
 Process all MP3 files in a directory:
 
 ```bash
-python src/mixcloud_match_to_lrc.py /path/to/your/podcasts
+uv run python src/mixcloud_match_to_lrc.py /path/to/your/podcasts
 ```
 
 Or process the current directory:
 
 ```bash
-python src/mixcloud_match_to_lrc.py
+uv run python src/mixcloud_match_to_lrc.py
 ```
 
 ## How It Works
