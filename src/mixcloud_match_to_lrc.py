@@ -4,6 +4,7 @@ import json
 import requests
 from pathlib import Path
 from mutagen import File
+from urllib.parse import unquote
 
 GRAPHQL_URL = "https://app.mixcloud.com/graphql"
 
@@ -24,7 +25,8 @@ def extract_lookup(url: str):
     m = re.search(r"mixcloud\.com/([^/]+)/([^/]+)/?", url)
     if not m:
         return None, None
-    return m.group(1), m.group(2)
+    # URL-decode the username and slug (handles special characters like æ, ø, etc.)
+    return unquote(m.group(1)), unquote(m.group(2))
 
 def fmt(sec):
     m = int(sec // 60)
@@ -93,7 +95,13 @@ def process_mp3(mp3_path: Path):
         return
 
     data = resp.json()
-    sections = data["data"]["cloudcastLookup"]["sections"]
+    cloudcast = data.get("data", {}).get("cloudcastLookup")
+    
+    if cloudcast is None:
+        print(f"Cloudcast not found on Mixcloud: {user}/{slug}")
+        return
+    
+    sections = cloudcast["sections"]
 
     # Count sections (both chapters and tracks) - skip if less than 2
     section_count = len(sections)
