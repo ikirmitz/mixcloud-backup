@@ -1,37 +1,11 @@
-import os
-import re
-import json
-import requests
 from pathlib import Path
 from mutagen import File
-from urllib.parse import unquote
 
-GRAPHQL_URL = "https://app.mixcloud.com/graphql"
-
-QUERY = """
-query Tracklist($lookup: CloudcastLookup!) {
-  cloudcastLookup(lookup: $lookup) {
-    sections {
-      __typename
-      ... on SectionBase { startSeconds }
-      ... on TrackSection { artistName songName }
-      ... on ChapterSection { chapter }
-    }
-  }
-}
-"""
-
-def extract_lookup(url: str):
-    m = re.search(r"mixcloud\.com/([^/]+)/([^/]+)/?", url)
-    if not m:
-        return None, None
-    # URL-decode the username and slug (handles special characters like æ, ø, etc.)
-    return unquote(m.group(1)), unquote(m.group(2))
-
-def fmt(sec):
-    m = int(sec // 60)
-    s = sec % 60
-    return f"[{m:02d}:{s:05.2f}]"
+# Import shared utilities
+try:
+    from .mixcloud_common import extract_lookup, format_lrc_timestamp, fetch_tracklist
+except ImportError:
+    from mixcloud_common import extract_lookup, format_lrc_timestamp, fetch_tracklist
 
 def process_mp3(mp3_path: Path):
     audio = File(mp3_path)
@@ -85,23 +59,10 @@ def process_mp3(mp3_path: Path):
 
     print(f"Fetching tracklist for: {user}/{slug}")
 
-    resp = requests.post(GRAPHQL_URL, json={
-        "query": QUERY,
-        "variables": {"lookup": {"username": user, "slug": slug}}
-    })
-
-    if resp.status_code != 200:
-        print(f"API error: HTTP {resp.status_code}")
-        return
-
-    data = resp.json()
-    cloudcast = data.get("data", {}).get("cloudcastLookup")
+    sections = fetch_tracklist(user, slug)
     
-    if cloudcast is None:
-        print(f"Cloudcast not found on Mixcloud: {user}/{slug}")
+    if sections is None:
         return
-    
-    sections = cloudcast["sections"]
 
     # Count sections (both chapters and tracks) - skip if less than 2
     section_count = len(sections)
@@ -128,12 +89,12 @@ def process_mp3(mp3_path: Path):
         f.write(f"[ar:{user}]\n")
         f.write(f"[ti:{mp3_path.stem}]\n\n")
 
-        for s in sections:
+        for i, s in enumerate(sections, 1):
             if s["__typename"] == "TrackSection":
                 title = f'{s["artistName"]} – {s["songName"]}'
             else:
                 title = s.get("chapter", "")
-            f.write(f"{fmt(s['startSeconds'])} {title}\n")
+            f.write(f"{format_lrc_timestamp(s['startSeconds'])} {i:02d}. {title}\n")
 
     print(f"✓ Wrote {lrc_path}")
 

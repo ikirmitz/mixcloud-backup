@@ -2,16 +2,21 @@
 
 ## Overview
 
-`mixcloud-lrc` is a Python utility that converts Mixcloud tracklists (for DJ mixes and podcasts) into LRC (lyric) files. It extracts Mixcloud URLs from MP3 metadata, queries the Mixcloud GraphQL API for track/chapter information, and generates synchronized LRC files with timestamps.
+`mixcloud-lrc` is a Python toolkit for backing up Mixcloud accounts and generating navigation files. It includes:
 
-**Purpose**: Enable chapter/track navigation in media players by converting Mixcloud tracklist data to the LRC format.
+1. **Automated Downloader** (`mixcloud_downloader.py`) - Downloads all playlists from a Mixcloud account using yt-dlp with intelligent quality selection based on source format
+2. **LRC Generator** (`mixcloud_match_to_lrc.py`) - Converts Mixcloud tracklists into LRC files for chapter navigation in media players
+
+**Purpose**: Backup Mixcloud content with optimal quality settings and enable chapter/track navigation in media players.
 
 ## Project Structure
 
 ```
 mixcloud-lrc/
 ├── src/
-│   └── mixcloud_match_to_lrc.py    # Main implementation
+│   ├── mixcloud_common.py          # Shared utilities (API, URL parsing)
+│   ├── mixcloud_downloader.py      # Automated playlist downloader
+│   └── mixcloud_match_to_lrc.py    # LRC file generator
 ├── main.py                          # Entry point placeholder
 ├── pyproject.toml                   # Project configuration
 ├── README.md                        # User documentation
@@ -20,43 +25,59 @@ mixcloud-lrc/
 
 ## Core Components
 
-### Main Module: `src/mixcloud_match_to_lrc.py`
+### Shared Module: `src/mixcloud_common.py`
+
+**Purpose**: Shared utilities used by both the downloader and LRC generator.
 
 **Dependencies**:
-- `mutagen.File` - Universal audio metadata reading (supports MP3, MP4/M4A, etc.)
 - `requests` - HTTP client for GraphQL API
-- `pathlib.Path` - File system operations
+- `urllib.parse.unquote` - URL decoding
 - `re` - URL pattern matching
-- `json` - JSON handling
 
 **Constants**:
 - `GRAPHQL_URL = "https://app.mixcloud.com/graphql"`
+- `TRACKLIST_QUERY` - GraphQL query for fetching tracklist sections
 
-### Key Functions
+#### Key Functions
 
-#### `extract_lookup(url: str) -> tuple[str | None, str | None]`
+##### `extract_lookup(url: str) -> tuple[str | None, str | None]`
 **Purpose**: Parse Mixcloud URL to extract username and slug
 **Pattern**: `r"mixcloud\.com/([^/]+)/([^/]+)/?"`
 **Returns**: `(username, slug)` tuple or `(None, None)` if invalid
+**Note**: Handles URL-encoded characters (e.g., `%C3%A6` → `æ`)
 **Example**: `"https://www.mixcloud.com/user/mix-name/"` → `("user", "mix-name")`
 
-#### `fmt(sec: float) -> str`
+##### `format_lrc_timestamp(seconds: float) -> str`
 **Purpose**: Convert seconds to LRC timestamp format
 **Format**: `[MM:SS.CC]` where MM=minutes, SS=seconds, CC=centiseconds
-**Example**: `fmt(65.5)` → `"[01:05.50]"`
+**Example**: `format_lrc_timestamp(65.5)` → `"[01:05.50]"`
 
-#### `process_mp3(mp3_path: Path) -> None`
+##### `fetch_tracklist(username: str, slug: str) -> list[dict] | None`
+**Purpose**: Fetch tracklist sections from Mixcloud GraphQL API
+**Returns**: List of section dicts or `None` if not found/error
+**Section dict keys**: `__typename`, `startSeconds`, `artistName`, `songName`, `chapter`
+
+### LRC Generator: `src/mixcloud_match_to_lrc.py`
+
+**Dependencies**:
+- `mutagen.File` - Universal audio metadata reading (supports MP3, MP4/M4A, etc.)
+- `pathlib.Path` - File system operations
+- `mixcloud_common` - Shared utilities
+
+#### Key Functions
+
+##### `process_mp3(mp3_path: Path) -> None`
 **Purpose**: Main processing logic for a single MP3 file
 
 **Processing Steps**:
 1. Read audio file and extract duration
 2. Read metadata tags
 3. Extract Mixcloud URL from tags (TXXX:purl, purl, WPUB, WOAS, WXXX:purl, comment)
-4. Parse username and slug from URL
-5. Query GraphQL API
+4. Parse username and slug from URL (via `extract_lookup`)
+5. Fetch tracklist from API (via `fetch_tracklist`)
 6. Validate section count (minimum 2)
 7. Check for timing data; if missing, calculate evenly-spaced timestamps
-8. Generate LRC file
+8. Generate LRC file with numbered tracks (e.g., "01. Artist – Song")
 
 **Exit Conditions**:
 - No tags → skip
@@ -65,9 +86,86 @@ mixcloud-lrc/
 - Less than 2 sections → skip with message
 - No timing data and no audio duration → skip with message
 
-#### `walk(root: str) -> None`
+##### `walk(root: str) -> None`
 **Purpose**: Recursively process all MP3 files in directory
 **Error Handling**: Catches exceptions for individual files, continues processing
+
+### Downloader Module: `src/mixcloud_downloader.py`
+
+**Dependencies**:
+- `yt_dlp` - Media downloader with Mixcloud extractor
+- `pathlib.Path` - File system operations
+- `argparse` - Command-line argument parsing
+
+#### Key Functions
+
+##### `get_user_playlists(username: str) -> list[dict]`
+**Purpose**: Fetch all playlist URLs and titles for a Mixcloud user
+**Method**: Uses yt-dlp's `extract_flat` mode on `https://mixcloud.com/{username}/playlists/`
+**Returns**: List of dicts with `url` and `title` keys
+
+##### `get_playlist_entries(playlist_url: str) -> list[dict]`
+**Purpose**: Get all track entries from a single playlist
+**Method**: Uses yt-dlp's `extract_flat` mode
+**Returns**: List of track info dicts including `url` field
+
+##### `detect_audio_codec(url: str) -> str`
+**Purpose**: Detect audio codec before download to determine quality settings
+**Method**: Uses `yt_dlp.YoutubeDL.extract_info(url, download=False)` to inspect formats
+**Returns**: `'opus'` for webm/opus, `'aac'` for m4a/aac, `'unknown'` if detection fails
+
+##### `download_track(url: str, output_dir: Path, archive_path: Path, codec: str) -> Path | None`
+**Purpose**: Download single track with codec-appropriate quality settings
+**Quality Mapping**:
+- `opus` → `-q:a 0` (best quality, ~245 kbps VBR)
+- `aac` → `-q:a 2` (medium quality, ~170 kbps VBR)
+
+**yt-dlp Options Applied**:
+- `format`: `bestaudio/best`
+- `extractaudio`: Convert to MP3
+- `writethumbnail` + `EmbedThumbnail`: Embed cover art
+- `FFmpegMetadata`: Embed metadata tags
+- `writeinfojson`: Save metadata JSON (to `metadata/` subfolder)
+- `download_archive`: Track completed downloads
+- `sleep_interval`: 2-5 seconds between downloads
+
+##### `download_playlist(playlist_url: str, playlist_title: str, output_dir: Path, archive_path: Path) -> list[Path]`
+**Purpose**: Download all tracks from a playlist with conditional quality
+**Process**:
+1. Fetch playlist entries
+2. For each track: detect codec → download with appropriate quality
+3. Return list of downloaded MP3 paths
+
+##### `generate_lrc_files(mp3_files: list[Path]) -> None`
+**Purpose**: Generate LRC files for newly downloaded MP3s
+**Method**: Calls `process_mp3()` from `mixcloud_match_to_lrc.py`
+
+#### Command-Line Interface
+
+```bash
+uv run python src/mixcloud_downloader.py USERNAME [options]
+```
+
+**Arguments**:
+- `username`: Mixcloud account to download from (required)
+- `--output, -o`: Output directory (default: current directory)
+- `--archive, -a`: Download archive file (default: `~/mixcloud-archive.txt`)
+- `--no-lrc`: Skip LRC file generation
+- `--dry-run`: List playlists without downloading
+
+#### Output Structure
+
+```
+{output_dir}/
+├── {uploader}/
+│   └── {playlist_title}/
+│       ├── {upload_date} - {title}.mp3
+│       └── {upload_date} - {title}.lrc
+└── metadata/
+    └── {uploader}/
+        └── {playlist_title}/
+            └── {upload_date} - {title}.info.json
+```
 
 ## GraphQL API Integration
 
@@ -261,6 +359,7 @@ uv sync
 ### Required Packages
 - **mutagen** ≥ 1.47.0: Multimedia tagging library (reads MP3, MP4, FLAC, etc.)
 - **requests** ≥ 2.32.5: HTTP library for API calls
+- **yt-dlp** ≥ 2024.0.0: Media downloader with Mixcloud support
 
 ### Standard Library
 - `pathlib`: Modern file path operations

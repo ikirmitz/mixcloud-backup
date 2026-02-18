@@ -1,10 +1,15 @@
 # mixcloud-lrc
 
-Convert Mixcloud podcast tracklists to LRC files for chapter navigation in your media player.
+Backup your Mixcloud account and generate LRC chapter files for media player navigation.
 
 ## What is this?
 
-This tool reads your Mixcloud podcast MP3 files and generates `.lrc` files (the same format used for song lyrics) containing timestamped chapter markers. This enables chapter navigation in media players that support LRC files.
+This project provides two tools for working with Mixcloud content:
+
+1. **Automated Downloader** - Download all playlists from a Mixcloud account with intelligent quality selection
+2. **LRC Generator** - Create `.lrc` files (lyric format) with timestamped chapter markers for media player navigation
+
+The downloader automatically detects whether each track uses the newer high-quality format (opus) or older format (aac), and adjusts MP3 encoding quality accordingly to avoid bloating files from low-quality sources.
 
 ## Quick Start
 
@@ -37,6 +42,56 @@ Or process the current directory:
 
 ```bash
 uv run python src/mixcloud_match_to_lrc.py
+```
+
+## Automated Downloads
+
+Download all playlists from a Mixcloud account:
+
+```bash
+uv run python src/mixcloud_downloader.py USERNAME
+```
+
+### Options
+
+```bash
+# Specify output directory
+uv run python src/mixcloud_downloader.py USERNAME --output ~/Music/mixcloud
+
+# Use custom archive file (tracks what's already downloaded)
+uv run python src/mixcloud_downloader.py USERNAME --archive ~/my-archive.txt
+
+# Preview playlists without downloading
+uv run python src/mixcloud_downloader.py USERNAME --dry-run
+
+# Skip LRC generation (download only)
+uv run python src/mixcloud_downloader.py USERNAME --no-lrc
+```
+
+### Quality Selection
+
+The downloader automatically detects the source audio format and applies appropriate MP3 quality:
+
+| Source Format | Used By | MP3 Quality | Result |
+|--------------|---------|-------------|--------|
+| webm/opus | Newer uploads (HQ) | `-q:a 0` | ~245 kbps VBR |
+| m4a/aac | Older uploads | `-q:a 2` | ~170 kbps VBR |
+
+This prevents unnecessarily large files when the source audio is already low quality.
+
+### Output Structure
+
+```
+./
+├── Uploader/
+│   └── Playlist Name/
+│       ├── 20240101 - Mix Title.mp3
+│       ├── 20240101 - Mix Title.lrc
+│       └── ...
+└── metadata/
+    └── Uploader/
+        └── Playlist Name/
+            └── 20240101 - Mix Title.info.json
 ```
 
 ## How It Works
@@ -111,6 +166,15 @@ The API didn't provide timestamps and the audio file duration couldn't be read.
 
 ## Features
 
+### Downloader
+- Automatically discovers all playlists for a Mixcloud account
+- Intelligent quality selection based on source format (opus vs aac)
+- Download archive to resume interrupted sessions
+- Embedded metadata, thumbnails, and info.json files
+- Rate limiting with configurable sleep intervals
+- Automatic LRC generation for downloaded files
+
+### LRC Generator
 - Supports both DJ mixes (with track listings) and podcasts (with chapters)
 - Automatic timestamp calculation when API data is missing
 - Recursive directory scanning
