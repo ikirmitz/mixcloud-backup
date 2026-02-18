@@ -5,7 +5,7 @@ Unit tests for mixcloud_common.py shared utilities.
 import pytest
 from unittest.mock import patch, Mock
 
-from mixcloud_common import extract_lookup, format_lrc_timestamp, fetch_tracklist
+from mixcloud_common import extract_lookup, format_lrc_timestamp, fetch_tracklist, fetch_user_playlists
 
 
 class TestExtractLookup:
@@ -250,3 +250,146 @@ class TestFetchTracklist:
             "lookup": {"username": "testuser", "slug": "testslug"}
         }
         assert "cloudcastLookup" in call_kwargs['json']['query']
+
+
+class TestFetchUserPlaylists:
+    """Tests for fetch_user_playlists function."""
+    
+    @patch('mixcloud_common.requests.post')
+    def test_returns_playlists(self, mock_post):
+        """Returns list of playlist dicts with name and slug."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": {
+                "userLookup": {
+                    "playlists": {
+                        "edges": [
+                            {"node": {"name": "Playlist One", "slug": "playlist-one"}},
+                            {"node": {"name": "Playlist Two", "slug": "playlist-two"}}
+                        ],
+                        "pageInfo": {"hasNextPage": False, "endCursor": None}
+                    }
+                }
+            }
+        }
+        mock_post.return_value = mock_response
+        
+        playlists = fetch_user_playlists("testuser")
+        
+        assert len(playlists) == 2
+        assert playlists[0] == {"name": "Playlist One", "slug": "playlist-one"}
+        assert playlists[1] == {"name": "Playlist Two", "slug": "playlist-two"}
+    
+    @patch('mixcloud_common.requests.post')
+    def test_handles_pagination(self, mock_post):
+        """Fetches multiple pages of playlists."""
+        # First page response
+        page1 = Mock()
+        page1.status_code = 200
+        page1.json.return_value = {
+            "data": {
+                "userLookup": {
+                    "playlists": {
+                        "edges": [{"node": {"name": "Page 1", "slug": "page-1"}}],
+                        "pageInfo": {"hasNextPage": True, "endCursor": "cursor123"}
+                    }
+                }
+            }
+        }
+        # Second page response
+        page2 = Mock()
+        page2.status_code = 200
+        page2.json.return_value = {
+            "data": {
+                "userLookup": {
+                    "playlists": {
+                        "edges": [{"node": {"name": "Page 2", "slug": "page-2"}}],
+                        "pageInfo": {"hasNextPage": False, "endCursor": None}
+                    }
+                }
+            }
+        }
+        mock_post.side_effect = [page1, page2]
+        
+        playlists = fetch_user_playlists("testuser")
+        
+        assert len(playlists) == 2
+        assert playlists[0]["name"] == "Page 1"
+        assert playlists[1]["name"] == "Page 2"
+        assert mock_post.call_count == 2
+    
+    @patch('mixcloud_common.requests.post')
+    def test_user_not_found(self, mock_post):
+        """Returns None when user doesn't exist."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": {"userLookup": None}}
+        mock_post.return_value = mock_response
+        
+        result = fetch_user_playlists("nonexistent")
+        
+        assert result is None
+    
+    @patch('mixcloud_common.requests.post')
+    def test_http_error(self, mock_post):
+        """Returns None on HTTP error."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_post.return_value = mock_response
+        
+        result = fetch_user_playlists("testuser")
+        
+        assert result is None
+    
+    @patch('mixcloud_common.requests.post')
+    def test_network_error(self, mock_post):
+        """Returns None on network error."""
+        import requests as req
+        mock_post.side_effect = req.RequestException("Timeout")
+        
+        result = fetch_user_playlists("testuser")
+        
+        assert result is None
+    
+    @patch('mixcloud_common.requests.post')
+    def test_empty_playlists(self, mock_post):
+        """Returns empty list when user has no playlists."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": {
+                "userLookup": {
+                    "playlists": {
+                        "edges": [],
+                        "pageInfo": {"hasNextPage": False}
+                    }
+                }
+            }
+        }
+        mock_post.return_value = mock_response
+        
+        playlists = fetch_user_playlists("testuser")
+        
+        assert playlists == []
+    
+    @patch('mixcloud_common.requests.post')
+    def test_handles_missing_fields(self, mock_post):
+        """Handles missing name/slug with defaults."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": {
+                "userLookup": {
+                    "playlists": {
+                        "edges": [{"node": {}}],
+                        "pageInfo": {"hasNextPage": False}
+                    }
+                }
+            }
+        }
+        mock_post.return_value = mock_response
+        
+        playlists = fetch_user_playlists("testuser")
+        
+        assert playlists[0] == {"name": "Unknown", "slug": ""}

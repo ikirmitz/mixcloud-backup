@@ -73,35 +73,34 @@ class TestExtractEntries:
 class TestGetUserPlaylists:
     """Tests for get_user_playlists function."""
     
-    @patch('mixcloud_downloader._extract_entries')
-    def test_returns_playlists(self, mock_extract):
-        """Returns formatted playlist dicts."""
-        mock_extract.return_value = [
-            {'url': 'https://mixcloud.com/user/playlist1/', 'title': 'My Playlist'},
-            {'url': 'https://mixcloud.com/user/playlist2/', 'title': 'Another Playlist'},
+    @patch('mixcloud_downloader.fetch_user_playlists')
+    def test_returns_playlists(self, mock_fetch):
+        """Returns formatted playlist dicts with url and title."""
+        mock_fetch.return_value = [
+            {'name': 'My Playlist', 'slug': 'playlist1'},
+            {'name': 'Another Playlist', 'slug': 'playlist2'},
         ]
         
         playlists = get_user_playlists("testuser")
         
         assert len(playlists) == 2
-        assert playlists[0] == {'url': 'https://mixcloud.com/user/playlist1/', 'title': 'My Playlist'}
-        mock_extract.assert_called_once_with("https://www.mixcloud.com/testuser/playlists/")
+        assert playlists[0] == {'url': 'https://www.mixcloud.com/testuser/playlists/playlist1/', 'title': 'My Playlist'}
+        assert playlists[1] == {'url': 'https://www.mixcloud.com/testuser/playlists/playlist2/', 'title': 'Another Playlist'}
+        mock_fetch.assert_called_once_with("testuser")
     
-    @patch('mixcloud_downloader._extract_entries')
-    def test_handles_missing_title(self, mock_extract):
-        """Missing title defaults to 'Unknown Playlist'."""
-        mock_extract.return_value = [
-            {'url': 'https://mixcloud.com/user/playlist1/'},
-        ]
+    @patch('mixcloud_downloader.fetch_user_playlists')
+    def test_returns_empty_on_none(self, mock_fetch):
+        """Returns empty list when API returns None."""
+        mock_fetch.return_value = None
         
         playlists = get_user_playlists("testuser")
         
-        assert playlists[0]['title'] == 'Unknown Playlist'
+        assert playlists == []
     
-    @patch('mixcloud_downloader._extract_entries')
-    def test_returns_empty_on_error(self, mock_extract):
-        """Returns empty list on extraction error."""
-        mock_extract.side_effect = Exception("Network error")
+    @patch('mixcloud_downloader.fetch_user_playlists')
+    def test_returns_empty_list(self, mock_fetch):
+        """Returns empty list when user has no playlists."""
+        mock_fetch.return_value = []
         
         playlists = get_user_playlists("testuser")
         

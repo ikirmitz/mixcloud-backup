@@ -19,8 +19,10 @@ import yt_dlp
 # Handle both direct execution and module import
 try:
     from .mixcloud_match_to_lrc import process_mp3
+    from .mixcloud_common import fetch_user_playlists
 except ImportError:
     from mixcloud_match_to_lrc import process_mp3
+    from mixcloud_common import fetch_user_playlists
 
 
 # Shared yt-dlp options for quiet extraction without downloading
@@ -54,19 +56,22 @@ def get_user_playlists(username: str) -> list[dict]:
     """
     Get all playlist URLs and titles for a Mixcloud user.
     
+    Uses Mixcloud GraphQL API to discover playlists.
+    
     Returns list of dicts with 'url' and 'title' keys.
     """
-    playlists_url = f"https://www.mixcloud.com/{username}/playlists/"
+    playlists = fetch_user_playlists(username)
     
-    try:
-        entries = _extract_entries(playlists_url)
-        return [
-            {'url': e.get('url'), 'title': e.get('title', 'Unknown Playlist')}
-            for e in entries
-        ]
-    except Exception as e:
-        print(f"Error fetching playlists for {username}: {e}")
+    if playlists is None:
         return []
+    
+    return [
+        {
+            'url': f"https://www.mixcloud.com/{username}/playlists/{p['slug']}/",
+            'title': p['name']
+        }
+        for p in playlists
+    ]
 
 
 def get_playlist_entries(playlist_url: str) -> list[dict]:
@@ -116,7 +121,7 @@ def detect_audio_codec(url: str) -> str:
     return 'unknown'
 
 
-def download_track(url: str, output_dir: Path, archive_path: Path, codec: str) -> Path | None:
+def download_track(url: str, output_dir: Path, archive_path: Path, codec: str, playlist_title: str = 'Unknown') -> Path | None:
     """
     Download a single track with quality settings based on codec.
     
@@ -125,6 +130,7 @@ def download_track(url: str, output_dir: Path, archive_path: Path, codec: str) -
         output_dir: Base directory for downloads
         archive_path: Path to download archive file
         codec: Detected codec ('opus', 'aac', or 'unknown')
+        playlist_title: Name of the playlist (used in output path)
     
     Returns:
         Path to downloaded file, or None if skipped/failed
@@ -132,9 +138,12 @@ def download_track(url: str, output_dir: Path, archive_path: Path, codec: str) -
     # Quality mapping: opus gets best quality, aac gets medium to avoid bloat
     quality = '0' if codec == 'opus' else '2'
     
+    # Sanitize playlist title for filesystem (replace problematic chars)
+    safe_playlist = playlist_title.replace('/', '-').replace('\\', '-').replace(':', '-')
+    
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': str(output_dir / '%(uploader)s/%(playlist_title)s/%(upload_date)s - %(title)s.%(ext)s'),
+        'outtmpl': str(output_dir / f'%(uploader)s/{safe_playlist}/%(upload_date)s - %(title)s.%(ext)s'),
         'download_archive': str(archive_path),
         'sleep_interval': 2,
         'max_sleep_interval': 5,
@@ -163,8 +172,8 @@ def download_track(url: str, output_dir: Path, archive_path: Path, codec: str) -
     
     # Add separate output for infojson
     ydl_opts['outtmpl'] = {
-        'default': str(output_dir / '%(uploader)s/%(playlist_title)s/%(upload_date)s - %(title)s.%(ext)s'),
-        'infojson': str(output_dir / 'metadata/%(uploader)s/%(playlist_title)s/%(upload_date)s - %(title)s.%(ext)s'),
+        'default': str(output_dir / f'%(uploader)s/{safe_playlist}/%(upload_date)s - %(title)s.%(ext)s'),
+        'infojson': str(output_dir / f'metadata/%(uploader)s/{safe_playlist}/%(upload_date)s - %(title)s.%(ext)s'),
     }
     
     downloaded_file = None
@@ -240,7 +249,7 @@ def download_playlist(playlist_url: str, playlist_title: str, output_dir: Path, 
         print(f"  Codec: {codec} → MP3 quality: {quality_desc}")
         
         # Download with appropriate quality
-        mp3_path = download_track(url, output_dir, archive_path, codec)
+        mp3_path = download_track(url, output_dir, archive_path, codec, playlist_title)
         
         if mp3_path and mp3_path.exists():
             downloaded_files.append(mp3_path)

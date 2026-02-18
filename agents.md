@@ -37,6 +37,7 @@ mixcloud-lrc/
 **Constants**:
 - `GRAPHQL_URL = "https://app.mixcloud.com/graphql"`
 - `TRACKLIST_QUERY` - GraphQL query for fetching tracklist sections
+- `USER_PLAYLISTS_QUERY` - GraphQL query for fetching user playlists (with pagination)
 
 #### Key Functions
 
@@ -56,6 +57,12 @@ mixcloud-lrc/
 **Purpose**: Fetch tracklist sections from Mixcloud GraphQL API
 **Returns**: List of section dicts or `None` if not found/error
 **Section dict keys**: `__typename`, `startSeconds`, `artistName`, `songName`, `chapter`
+
+##### `fetch_user_playlists(username: str) -> list[dict] | None`
+**Purpose**: Fetch all playlists for a Mixcloud user via GraphQL API
+**Returns**: List of playlist dicts or `None` if user not found/error
+**Playlist dict keys**: `name` (display name), `slug` (URL slug)
+**Note**: Handles pagination automatically to retrieve all playlists
 
 ### LRC Generator: `src/mixcloud_match_to_lrc.py`
 
@@ -101,7 +108,7 @@ mixcloud-lrc/
 
 ##### `get_user_playlists(username: str) -> list[dict]`
 **Purpose**: Fetch all playlist URLs and titles for a Mixcloud user
-**Method**: Uses yt-dlp's `extract_flat` mode on `https://mixcloud.com/{username}/playlists/`
+**Method**: Uses Mixcloud GraphQL API via `fetch_user_playlists()` from mixcloud_common
 **Returns**: List of dicts with `url` and `title` keys
 
 ##### `get_playlist_entries(playlist_url: str) -> list[dict]`
@@ -218,6 +225,45 @@ query Tracklist($lookup: CloudcastLookup!) {
 ```
 
 **Note**: `startSeconds` can be `null` for some uploads. The tool handles this by calculating evenly-spaced timestamps.
+
+### User Playlists Query
+```graphql
+query UserPlaylists($lookup: UserLookup!, $first: Int!, $after: String) {
+  userLookup(lookup: $lookup) {
+    playlists(first: $first, after: $after, orderBy: ALPHABETICAL) {
+      edges { node { name slug } }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+```
+
+### User Playlists Variables
+```json
+{
+  "lookup": {"username": "string"},
+  "first": 50,
+  "after": null
+}
+```
+
+### User Playlists Response
+```json
+{
+  "data": {
+    "userLookup": {
+      "playlists": {
+        "edges": [
+          {"node": {"name": "Playlist Name", "slug": "playlist-slug"}}
+        ],
+        "pageInfo": {"hasNextPage": false, "endCursor": null}
+      }
+    }
+  }
+}
+```
+
+**Note**: The `after` cursor is used for pagination. Set `hasNextPage: true` triggers additional requests with the `endCursor` value.
 
 ## Data Flow
 

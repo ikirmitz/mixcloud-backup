@@ -28,6 +28,26 @@ query Tracklist($lookup: CloudcastLookup!) {
 }
 """
 
+# GraphQL query for fetching user playlists
+USER_PLAYLISTS_QUERY = """
+query UserPlaylists($lookup: UserLookup!, $first: Int!, $after: String) {
+  userLookup(lookup: $lookup) {
+    playlists(first: $first, after: $after, orderBy: ALPHABETICAL) {
+      edges {
+        node {
+          name
+          slug
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
+"""
+
 
 def extract_lookup(url: str) -> tuple[str | None, str | None]:
     """
@@ -110,6 +130,79 @@ def fetch_tracklist(username: str, slug: str) -> list[dict] | None:
             return None
         
         return cloudcast.get("sections", [])
+    
+    except requests.RequestException as e:
+        print(f"Network error: {e}")
+        return None
+
+
+def fetch_user_playlists(username: str) -> list[dict] | None:
+    """
+    Fetch all playlists for a Mixcloud user via GraphQL API.
+    
+    Handles pagination automatically to retrieve all playlists.
+    
+    Args:
+        username: Mixcloud username
+    
+    Returns:
+        List of playlist dicts with keys:
+        - name: Playlist display name
+        - slug: URL slug for the playlist
+        
+        Returns None if user not found or API error.
+    """
+    all_playlists = []
+    after_cursor = None
+    
+    try:
+        while True:
+            resp = requests.post(
+                GRAPHQL_URL,
+                json={
+                    "query": USER_PLAYLISTS_QUERY,
+                    "variables": {
+                        "lookup": {"username": username},
+                        "first": 50,
+                        "after": after_cursor
+                    }
+                },
+                headers={
+                    "origin": "https://www.mixcloud.com",
+                    "referer": "https://www.mixcloud.com/"
+                },
+                timeout=30
+            )
+            
+            if resp.status_code != 200:
+                print(f"API error: HTTP {resp.status_code}")
+                return None
+            
+            data = resp.json()
+            user_data = data.get("data", {}).get("userLookup")
+            
+            if user_data is None:
+                print(f"User not found on Mixcloud: {username}")
+                return None
+            
+            playlists_data = user_data.get("playlists", {})
+            edges = playlists_data.get("edges", [])
+            
+            for edge in edges:
+                node = edge.get("node", {})
+                all_playlists.append({
+                    "name": node.get("name", "Unknown"),
+                    "slug": node.get("slug", "")
+                })
+            
+            # Check for more pages
+            page_info = playlists_data.get("pageInfo", {})
+            if page_info.get("hasNextPage"):
+                after_cursor = page_info.get("endCursor")
+            else:
+                break
+        
+        return all_playlists
     
     except requests.RequestException as e:
         print(f"Network error: {e}")
