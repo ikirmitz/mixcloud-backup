@@ -14,6 +14,7 @@ import argparse
 from pathlib import Path
 
 import yt_dlp
+from yt_dlp.utils import sanitize_filename
 
 # Import LRC generation from sibling module
 # Handle both direct execution and module import
@@ -33,7 +34,7 @@ _YTDLP_QUIET_OPTS: dict = {
 
 _YTDLP_FLAT_OPTS: dict = {
     **_YTDLP_QUIET_OPTS,
-    'extract_flat': True,
+    'extract_flat': 'in_playlist',
 }
 
 
@@ -88,6 +89,50 @@ def get_playlist_entries(playlist_url: str) -> list[dict]:
         return []
 
 
+def fetch_track_info(url: str) -> dict | None:
+    """
+    Fetch full metadata for a Mixcloud track.
+    
+    Returns info dict with title, formats, etc. or None on error.
+    """
+    with yt_dlp.YoutubeDL(_YTDLP_QUIET_OPTS) as ydl:
+        try:
+            return ydl.extract_info(url, download=False)
+        except Exception as e:
+            print(f"  Warning: Could not fetch track info: {e}")
+    return None
+
+
+def extract_codec_from_info(info: dict | None) -> str:
+    """
+    Extract audio codec from track info dict.
+    
+    Returns 'opus' for webm/opus streams, 'aac' for m4a/aac streams,
+    or 'unknown' if detection fails.
+    """
+    if not info:
+        return 'unknown'
+    
+    # Check formats for audio codec
+    formats = info.get('formats') or []
+    for fmt in formats:
+        acodec = fmt.get('acodec', '')
+        if acodec and acodec != 'none':
+            if 'opus' in acodec.lower():
+                return 'opus'
+            elif 'aac' in acodec.lower() or 'mp4a' in acodec.lower():
+                return 'aac'
+    
+    # Fallback: check top-level acodec
+    acodec = info.get('acodec', '')
+    if 'opus' in acodec.lower():
+        return 'opus'
+    elif 'aac' in acodec.lower() or 'mp4a' in acodec.lower():
+        return 'aac'
+    
+    return 'unknown'
+
+
 def detect_audio_codec(url: str) -> str:
     """
     Detect the audio codec for a Mixcloud track.
@@ -95,33 +140,11 @@ def detect_audio_codec(url: str) -> str:
     Returns 'opus' for webm/opus streams, 'aac' for m4a/aac streams,
     or 'unknown' if detection fails.
     """
-    with yt_dlp.YoutubeDL(_YTDLP_QUIET_OPTS) as ydl:
-        try:
-            info = ydl.extract_info(url, download=False)
-            if info:
-                # Check formats for audio codec
-                formats = info.get('formats') or []
-                for fmt in formats:
-                    acodec = fmt.get('acodec', '')
-                    if acodec and acodec != 'none':
-                        if 'opus' in acodec.lower():
-                            return 'opus'
-                        elif 'aac' in acodec.lower() or 'mp4a' in acodec.lower():
-                            return 'aac'
-                
-                # Fallback: check top-level acodec
-                acodec = info.get('acodec', '')
-                if 'opus' in acodec.lower():
-                    return 'opus'
-                elif 'aac' in acodec.lower() or 'mp4a' in acodec.lower():
-                    return 'aac'
-        except Exception as e:
-            print(f"  Warning: Could not detect codec: {e}")
-    
-    return 'unknown'
+    info = fetch_track_info(url)
+    return extract_codec_from_info(info)
 
 
-def download_track(url: str, output_dir: Path, archive_path: Path, codec: str, playlist_title: str = 'Unknown') -> Path | None:
+def download_track(url: str, output_dir: Path, archive_path: Path, codec: str, playlist_title: str = 'Unknown', info: dict | None = None) -> Path | None:
     """
     Download a single track with quality settings based on codec.
     
@@ -131,15 +154,28 @@ def download_track(url: str, output_dir: Path, archive_path: Path, codec: str, p
         archive_path: Path to download archive file
         codec: Detected codec ('opus', 'aac', or 'unknown')
         playlist_title: Name of the playlist (used in output path)
+        info: Track info dict (used to calculate expected path)
     
     Returns:
-        Path to downloaded file, or None if skipped/failed
+        Path to MP3 file (downloaded or existing), or None if failed
     """
     # Quality mapping: opus gets best quality, aac gets medium to avoid bloat
     quality = '0' if codec == 'opus' else '2'
     
-    # Sanitize playlist title for filesystem (replace problematic chars)
-    safe_playlist = playlist_title.replace('/', '-').replace('\\', '-').replace(':', '-')
+    # Sanitize playlist title for filesystem (match yt-dlp's sanitization)
+    safe_playlist = sanitize_filename(playlist_title)
+    
+    # Calculate expected MP3 path from info using yt-dlp's sanitization
+    expected_path = None
+    expected_dir = None
+    upload_date = None
+    if info:
+        uploader = info.get('uploader', 'Unknown')
+        upload_date = info.get('upload_date', 'Unknown')
+        title = info.get('title', 'Unknown')
+        safe_title = sanitize_filename(title)
+        expected_dir = output_dir / uploader / safe_playlist
+        expected_path = expected_dir / f"{upload_date} - {safe_title}.mp3"
     
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -179,9 +215,6 @@ def download_track(url: str, output_dir: Path, archive_path: Path, codec: str, p
     downloaded_file = None
     
     class DownloadLogger:
-        def __init__(self):
-            self.filename = None
-        
         def debug(self, msg):
             pass
         
@@ -191,23 +224,42 @@ def download_track(url: str, output_dir: Path, archive_path: Path, codec: str, p
         def error(self, msg):
             print(f"  Error: {msg}")
     
-    def progress_hook(d):
+    def postprocessor_hook(d):
         nonlocal downloaded_file
+        # Capture final filepath after each postprocessor finishes
         if d['status'] == 'finished':
-            downloaded_file = Path(d.get('filename', ''))
+            filepath = d.get('info_dict', {}).get('filepath')
+            if filepath and filepath.endswith('.mp3'):
+                downloaded_file = Path(filepath)
     
     ydl_opts['logger'] = DownloadLogger()
-    ydl_opts['progress_hooks'] = [progress_hook]
+    ydl_opts['postprocessor_hooks'] = [postprocessor_hook]
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             ydl.download([url])
-            # Return the MP3 path (extension changed by postprocessor)
-            if downloaded_file:
-                return downloaded_file.with_suffix('.mp3')
+            # Return the final MP3 path (captured by postprocessor hook)
+            if downloaded_file and downloaded_file.exists():
+                return downloaded_file
+            # If no download happened (skipped/archived), try to find existing file
+            if expected_path and expected_path.exists():
+                print("  (already exists)")
+                return expected_path
+            # Fallback: glob for file with matching upload_date prefix
+            if expected_dir and expected_dir.exists() and upload_date:
+                pattern = f"{upload_date} - *.mp3"
+                matches = list(expected_dir.glob(pattern))
+                if matches:
+                    print(f"  (found existing: {matches[0].name})")
+                    return matches[0]
+                else:
+                    print(f"  (no matching file found for {upload_date})")
         except yt_dlp.utils.DownloadError as e:
             if 'already been recorded' in str(e) or 'has already been downloaded' in str(e).lower():
-                print("  (already downloaded, skipping)")
+                print("  (already in archive)")
+                # Return expected path if file exists (for LRC generation)
+                if expected_path and expected_path.exists():
+                    return expected_path
             else:
                 print(f"  Download error: {e}")
         except Exception as e:
@@ -216,9 +268,12 @@ def download_track(url: str, output_dir: Path, archive_path: Path, codec: str, p
     return None
 
 
-def download_playlist(playlist_url: str, playlist_title: str, output_dir: Path, archive_path: Path) -> list[Path]:
+def download_playlist(playlist_url: str, playlist_title: str, output_dir: Path, archive_path: Path, generate_lrc: bool = True) -> list[Path]:
     """
     Download all tracks from a playlist with conditional quality.
+    
+    Args:
+        generate_lrc: If True, generate LRC file immediately after each track
     
     Returns list of paths to successfully downloaded MP3 files.
     """
@@ -239,21 +294,30 @@ def download_playlist(playlist_url: str, playlist_title: str, output_dir: Path, 
     
     for i, entry in enumerate(entries, 1):
         url = entry.get('url')
-        title = entry.get('title', 'Unknown')
+        
+        # Fetch full track info to get title and codec
+        info = fetch_track_info(url)
+        title = info.get('title', 'Unknown') if info else 'Unknown'
+        codec = extract_codec_from_info(info)
         
         print(f"[{i}/{len(entries)}] {title}")
-        
-        # Detect codec first
-        codec = detect_audio_codec(url)
         quality_desc = "best (opus source)" if codec == 'opus' else "medium (aac source)"
         print(f"  Codec: {codec} → MP3 quality: {quality_desc}")
         
         # Download with appropriate quality
-        mp3_path = download_track(url, output_dir, archive_path, codec, playlist_title)
+        mp3_path = download_track(url, output_dir, archive_path, codec, playlist_title, info)
         
         if mp3_path and mp3_path.exists():
             downloaded_files.append(mp3_path)
-            print(f"  ✓ Saved: {mp3_path}")
+            print(f"  ✓ Ready: {mp3_path}")
+            
+            # Generate LRC immediately
+            if generate_lrc:
+                print(f"  Generating LRC...")
+                try:
+                    process_mp3(mp3_path)
+                except Exception as e:
+                    print(f"  LRC error: {e}")
     
     return downloaded_files
 
@@ -263,17 +327,19 @@ def generate_lrc_files(mp3_files: list[Path]) -> None:
     Generate LRC files for downloaded MP3s using mixcloud_match_to_lrc.
     """
     if not mp3_files:
+        print("\nNo MP3 files to generate LRC for.")
         return
     
     print(f"\n{'='*60}")
-    print("Generating LRC files...")
+    print(f"Generating LRC files for {len(mp3_files)} track(s)...")
     print(f"{'='*60}\n")
     
     for mp3_path in mp3_files:
+        print(f"Processing: {mp3_path.name}")
         try:
             process_mp3(mp3_path)
         except Exception as e:
-            print(f"LRC error for {mp3_path.name}: {e}")
+            print(f"  LRC error: {e}")
 
 
 def main():
@@ -335,13 +401,10 @@ Quality settings:
             playlist['url'],
             playlist['title'],
             args.output,
-            args.archive
+            args.archive,
+            generate_lrc=not args.no_lrc
         )
         all_downloaded.extend(downloaded)
-    
-    # Generate LRC files
-    if not args.no_lrc and all_downloaded:
-        generate_lrc_files(all_downloaded)
     
     # Summary
     print(f"\n{'='*60}")

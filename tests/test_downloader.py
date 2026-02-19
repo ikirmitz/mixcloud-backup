@@ -10,6 +10,8 @@ from mixcloud_downloader import (
     get_user_playlists,
     get_playlist_entries,
     detect_audio_codec,
+    extract_codec_from_info,
+    fetch_track_info,
     _extract_entries,
 )
 
@@ -267,3 +269,85 @@ class TestDetectAudioCodec:
         codec = detect_audio_codec("https://mixcloud.com/user/mix/")
         
         assert codec == 'aac'
+
+
+class TestExtractCodecFromInfo:
+    """Tests for extract_codec_from_info pure function."""
+    
+    def test_returns_unknown_for_none(self):
+        """Returns 'unknown' when info is None."""
+        assert extract_codec_from_info(None) == 'unknown'
+    
+    def test_returns_unknown_for_empty_dict(self):
+        """Returns 'unknown' for empty info dict."""
+        assert extract_codec_from_info({}) == 'unknown'
+    
+    def test_detects_opus_from_formats(self):
+        """Detects opus codec from formats list."""
+        info = {'formats': [{'acodec': 'opus', 'ext': 'webm'}]}
+        assert extract_codec_from_info(info) == 'opus'
+    
+    def test_detects_aac_from_formats(self):
+        """Detects aac codec from formats list."""
+        info = {'formats': [{'acodec': 'aac', 'ext': 'm4a'}]}
+        assert extract_codec_from_info(info) == 'aac'
+    
+    def test_detects_mp4a_as_aac(self):
+        """Detects mp4a.40.2 as aac."""
+        info = {'formats': [{'acodec': 'mp4a.40.2'}]}
+        assert extract_codec_from_info(info) == 'aac'
+    
+    def test_skips_none_acodec(self):
+        """Skips formats with acodec='none' (video only)."""
+        info = {
+            'formats': [
+                {'acodec': 'none', 'vcodec': 'h264'},
+                {'acodec': 'opus'},
+            ]
+        }
+        assert extract_codec_from_info(info) == 'opus'
+    
+    def test_falls_back_to_top_level_acodec(self):
+        """Falls back to top-level acodec when formats empty."""
+        info = {'formats': [], 'acodec': 'opus'}
+        assert extract_codec_from_info(info) == 'opus'
+    
+    def test_handles_none_formats_list(self):
+        """Handles None formats list gracefully."""
+        info = {'formats': None, 'acodec': 'aac'}
+        assert extract_codec_from_info(info) == 'aac'
+    
+    def test_case_insensitive_codec_detection(self):
+        """Codec detection is case-insensitive."""
+        info = {'formats': [{'acodec': 'OPUS'}]}
+        assert extract_codec_from_info(info) == 'opus'
+
+
+class TestFetchTrackInfo:
+    """Tests for fetch_track_info function."""
+    
+    @patch('mixcloud_downloader.yt_dlp.YoutubeDL')
+    def test_returns_info_dict(self, mock_ytdl_class):
+        """Returns info dict on success."""
+        mock_ydl = MagicMock()
+        mock_ydl.__enter__ = Mock(return_value=mock_ydl)
+        mock_ydl.__exit__ = Mock(return_value=False)
+        mock_ydl.extract_info.return_value = {'title': 'Test Mix', 'uploader': 'DJ'}
+        mock_ytdl_class.return_value = mock_ydl
+        
+        info = fetch_track_info("https://mixcloud.com/user/mix/")
+        
+        assert info == {'title': 'Test Mix', 'uploader': 'DJ'}
+    
+    @patch('mixcloud_downloader.yt_dlp.YoutubeDL')
+    def test_returns_none_on_error(self, mock_ytdl_class):
+        """Returns None on extraction error."""
+        mock_ydl = MagicMock()
+        mock_ydl.__enter__ = Mock(return_value=mock_ydl)
+        mock_ydl.__exit__ = Mock(return_value=False)
+        mock_ydl.extract_info.side_effect = Exception("Track not found")
+        mock_ytdl_class.return_value = mock_ydl
+        
+        info = fetch_track_info("https://mixcloud.com/user/missing/")
+        
+        assert info is None

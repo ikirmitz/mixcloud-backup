@@ -10,7 +10,7 @@ except ImportError:
 def process_mp3(mp3_path: Path):
     audio = File(mp3_path)
     if audio is None or audio.tags is None:
-        print(f"Skipping (no tags): {mp3_path}")
+        print(f"  Skipping (no tags in file)")
         return
 
     # Get audio duration in seconds
@@ -49,25 +49,26 @@ def process_mp3(mp3_path: Path):
             url = comment_str
 
     if not url:
-        print(f"Skipping (no podcast URL): {mp3_path}")
+        print(f"  Skipping (no Mixcloud URL in tags)")
         return
     user, slug = extract_lookup(url)
 
     if not user or not slug:
-        print(f"Bad Mixcloud URL: {url}")
+        print(f"  Skipping (bad Mixcloud URL format): {url}")
         return
 
-    print(f"Fetching tracklist for: {user}/{slug}")
+    print(f"  Fetching tracklist for: {user}/{slug}")
 
     sections = fetch_tracklist(user, slug)
     
     if sections is None:
+        print(f"  Skipping (could not fetch tracklist from API)")
         return
 
     # Count sections (both chapters and tracks) - skip if less than 2
     section_count = len(sections)
     if section_count < 2:
-        print(f"Skipping (only {section_count} section(s)): {mp3_path}")
+        print(f"  Skipping (only {section_count} section(s) in tracklist)")
         return
 
     # Count sections with valid timing
@@ -75,12 +76,12 @@ def process_mp3(mp3_path: Path):
 
     # If no timing info but we have audio duration, calculate evenly-spaced timestamps
     if len(timed_sections) < 2 and audio_duration:
-        print(f"No timing data - calculating evenly-spaced timestamps over {int(audio_duration/60)}:{int(audio_duration%60):02d}")
+        print(f"  No timing data - calculating evenly-spaced timestamps over {int(audio_duration/60)}:{int(audio_duration%60):02d}")
         interval = audio_duration / len(sections)
         for i, s in enumerate(sections):
             s['startSeconds'] = i * interval
     elif len(timed_sections) < 2:
-        print(f"Skipping (no timing information and no audio duration): {mp3_path}")
+        print(f"  Skipping (no timing information and no audio duration)")
         return
 
     lrc_path = mp3_path.with_suffix(".lrc")
@@ -96,7 +97,7 @@ def process_mp3(mp3_path: Path):
                 title = s.get("chapter", "")
             f.write(f"{format_lrc_timestamp(s['startSeconds'])} {i:02d}. {title}\n")
 
-    print(f"✓ Wrote {lrc_path}")
+    print(f"  ✓ Wrote {lrc_path.name} ({section_count} tracks)")
 
 def walk(root):
     for path in Path(root).rglob("*.mp3"):

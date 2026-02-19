@@ -127,7 +127,7 @@ class TestProcessMp3:
         
         # Check skip message
         captured = capsys.readouterr()
-        assert "Skipping (no tags)" in captured.out
+        assert "Skipping (no tags in file)" in captured.out
     
     @patch('mixcloud_match_to_lrc.File')
     def test_skips_file_without_mixcloud_url(self, mock_file, tmp_path, capsys):
@@ -142,7 +142,7 @@ class TestProcessMp3:
         
         assert not (tmp_path / "no-url.lrc").exists()
         captured = capsys.readouterr()
-        assert "Skipping (no podcast URL)" in captured.out
+        assert "Skipping (no Mixcloud URL in tags)" in captured.out
     
     @patch('mixcloud_match_to_lrc.fetch_tracklist')
     @patch('mixcloud_match_to_lrc.File')
