@@ -4,12 +4,16 @@ Backup your Mixcloud account and generate LRC chapter files for media player nav
 
 ## What is this?
 
-This project provides two tools for working with Mixcloud content:
+This project provides tools for working with Mixcloud content:
 
 1. **Automated Downloader** - Download all playlists from a Mixcloud account with intelligent quality selection
-2. **LRC Generator** - Create `.lrc` files (lyric format) with timestamped chapter markers for media player navigation
+2. **LRC Generator** - Fetch tracklists from Mixcloud API and embed them as lyrics (USLT tag) in MP3 files
+3. **LRC Embedder** - Embed existing `.lrc` files into MP3 files
+4. **Orphan Finder** - Find and download tracks that aren't in any playlist
 
 The downloader automatically detects whether each track uses the newer high-quality format (opus) or older format (aac), and adjusts MP3 encoding quality accordingly to avoid bloating files from low-quality sources.
+
+By default, tracklist data is embedded directly into MP3 files as USLT (lyrics) tags, making the chapter/track information portable with the file.
 
 ## Quick Start
 
@@ -64,8 +68,11 @@ uv run python src/mixcloud_downloader.py USERNAME --archive ~/my-archive.txt
 # Preview playlists without downloading
 uv run python src/mixcloud_downloader.py USERNAME --dry-run
 
-# Skip LRC generation (download only)
-uv run python src/mixcloud_downloader.py USERNAME --no-lrc
+# Skip lyrics embedding (download only)
+uv run python src/mixcloud_downloader.py USERNAME --no-embed
+
+# Write separate .lrc files (in addition to embedding)
+uv run python src/mixcloud_downloader.py USERNAME --write-lrc
 ```
 
 ### Quality Selection
@@ -85,8 +92,8 @@ This prevents unnecessarily large files when the source audio is already low qua
 ./
 ├── Uploader/
 │   └── Playlist Name/
-│       ├── 20240101 - Mix Title.mp3
-│       ├── 20240101 - Mix Title.lrc
+│       ├── 20240101 - Mix Title.mp3  (with embedded lyrics)
+│       ├── 20240101 - Mix Title.lrc  (only if --write-lrc used)
 │       └── ...
 └── metadata/
     └── Uploader/
@@ -94,13 +101,36 @@ This prevents unnecessarily large files when the source audio is already low qua
             └── 20240101 - Mix Title.info.json
 ```
 
+## Embed Existing LRC Files
+
+If you have existing `.lrc` files that you want to embed into their matching MP3 files:
+
+```bash
+uv run python src/embed_lrc.py /path/to/your/music
+```
+
+This finds all `.lrc` files and embeds their content into the matching `.mp3` file (same filename, different extension). The original `.lrc` files are preserved.
+
+## Find Orphan Tracks
+
+Find tracks that aren't in any playlist:
+
+```bash
+# List orphan tracks
+uv run python src/mixcloud_orphans.py USERNAME
+
+# Download orphan tracks
+uv run python src/mixcloud_orphans.py USERNAME --download
+```
+
 ## How It Works
 
 1. Scans your MP3 files for embedded Mixcloud URLs (in ID3 tags)
 2. Fetches the tracklist from Mixcloud's API
-3. Generates `.lrc` files with timestamped chapters/tracks
-4. If timing data is missing, automatically calculates evenly-spaced timestamps based on file duration
-5. Only creates LRC files for files with 2 or more sections
+3. Embeds the tracklist as USLT (lyrics) tag in the MP3 file
+4. Optionally writes `.lrc` files with timestamped chapters/tracks
+5. If timing data is missing, automatically calculates evenly-spaced timestamps based on file duration
+6. Only processes files with 2 or more sections
 
 ## Requirements
 
@@ -172,9 +202,11 @@ The API didn't provide timestamps and the audio file duration couldn't be read.
 - Download archive to resume interrupted sessions
 - Embedded metadata, thumbnails, and info.json files
 - Rate limiting with configurable sleep intervals
-- Automatic LRC generation for downloaded files
+- Automatic lyrics embedding for downloaded files
 
 ### LRC Generator
+- Embeds tracklists as USLT (lyrics) tag in MP3 files
+- Optionally writes separate .lrc files
 - Supports both DJ mixes (with track listings) and podcasts (with chapters)
 - Automatic timestamp calculation when API data is missing
 - Recursive directory scanning
@@ -182,6 +214,15 @@ The API didn't provide timestamps and the audio file duration couldn't be read.
 - UTF-8 encoding support
 - Multiple ID3 tag format support
 - No API key required
+
+### LRC Embedder
+- Embeds existing .lrc files into matching MP3 files
+- Preserves original .lrc files
+- Recursive directory scanning
+
+### Orphan Finder
+- Discovers tracks not in any playlist
+- Optional download with same quality settings as main downloader
 
 ## Limitations
 

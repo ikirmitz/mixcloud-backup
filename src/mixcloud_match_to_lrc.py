@@ -1,5 +1,6 @@
 from pathlib import Path
 from mutagen import File
+from mutagen.id3 import ID3, USLT
 
 # Import shared utilities
 try:
@@ -7,7 +8,84 @@ try:
 except ImportError:
     from mixcloud_common import extract_lookup, format_lrc_timestamp, fetch_tracklist
 
-def process_mp3(mp3_path: Path):
+
+def generate_lrc_content(username: str, title: str, sections: list[dict]) -> str:
+    """
+    Generate LRC file content from tracklist sections.
+    
+    Args:
+        username: Mixcloud username (used as artist)
+        title: Track title (used as title tag)
+        sections: List of section dicts with startSeconds and track/chapter info
+    
+    Returns:
+        Complete LRC file content as string
+    """
+    lines = []
+    lines.append(f"[ar:{username}]")
+    lines.append(f"[ti:{title}]")
+    lines.append("")  # Blank line after header
+    
+    for i, s in enumerate(sections, 1):
+        if s["__typename"] == "TrackSection":
+            track_title = f'{s["artistName"]} – {s["songName"]}'
+        else:
+            track_title = s.get("chapter", "")
+        timestamp = format_lrc_timestamp(s['startSeconds'])
+        lines.append(f"{timestamp} {i:02d}. {track_title}")
+    
+    return "\n".join(lines) + "\n"
+
+
+def embed_lyrics(mp3_path: Path, lrc_content: str) -> bool:
+    """
+    Embed LRC content as USLT (unsynchronized lyrics) tag in MP3 file.
+    
+    Args:
+        mp3_path: Path to MP3 file
+        lrc_content: LRC content to embed
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Load or create ID3 tags
+        try:
+            audio = ID3(mp3_path)
+        except Exception:
+            # File might not have ID3 tags yet
+            audio = ID3()
+        
+        # Remove existing USLT tags to avoid duplicates
+        audio.delall('USLT')
+        
+        # Add new USLT tag
+        audio.add(USLT(
+            encoding=3,  # UTF-8
+            lang='eng',
+            desc='',
+            text=lrc_content
+        ))
+        
+        audio.save(mp3_path)
+        return True
+    except Exception as e:
+        print(f"  Error embedding lyrics: {e}")
+        return False
+
+
+def process_mp3(mp3_path: Path, embed: bool = True, write_file: bool = False):
+    """
+    Process an MP3 file to generate LRC content and optionally embed/write it.
+    
+    Args:
+        mp3_path: Path to MP3 file
+        embed: If True, embed LRC content as USLT tag (default: True)
+        write_file: If True, write .lrc file to disk (default: False)
+    """
+    if not embed and not write_file:
+        return  # Nothing to do
+    
     audio = File(mp3_path)
     if audio is None or audio.tags is None:
         print(f"  Skipping (no tags in file)")
@@ -84,29 +162,63 @@ def process_mp3(mp3_path: Path):
         print(f"  Skipping (no timing information and no audio duration)")
         return
 
-    lrc_path = mp3_path.with_suffix(".lrc")
+    # Generate LRC content
+    lrc_content = generate_lrc_content(user, mp3_path.stem, sections)
+    
+    # Track what we did
+    actions = []
+    
+    # Write LRC file if requested
+    if write_file:
+        lrc_path = mp3_path.with_suffix(".lrc")
+        with open(lrc_path, "w", encoding="utf-8") as f:
+            f.write(lrc_content)
+        actions.append(f"wrote {lrc_path.name}")
+    
+    # Embed lyrics in MP3 if requested
+    if embed:
+        if embed_lyrics(mp3_path, lrc_content):
+            actions.append("embedded")
+    
+    action_str = " + ".join(actions)
+    print(f"  ✓ {action_str} ({section_count} tracks)")
 
-    with open(lrc_path, "w", encoding="utf-8") as f:
-        f.write(f"[ar:{user}]\n")
-        f.write(f"[ti:{mp3_path.stem}]\n\n")
 
-        for i, s in enumerate(sections, 1):
-            if s["__typename"] == "TrackSection":
-                title = f'{s["artistName"]} – {s["songName"]}'
-            else:
-                title = s.get("chapter", "")
-            f.write(f"{format_lrc_timestamp(s['startSeconds'])} {i:02d}. {title}\n")
-
-    print(f"  ✓ Wrote {lrc_path.name} ({section_count} tracks)")
-
-def walk(root):
+def walk(root, embed: bool = True, write_file: bool = False):
+    """
+    Recursively process all MP3 files in directory.
+    
+    Args:
+        root: Root directory to process
+        embed: If True, embed LRC content as USLT tag (default: True)
+        write_file: If True, write .lrc file to disk (default: False)
+    """
     for path in Path(root).rglob("*.mp3"):
         try:
-            process_mp3(path)
+            process_mp3(path, embed=embed, write_file=write_file)
         except Exception as e:
             print(f"Error on {path}: {e}")
 
+
 if __name__ == "__main__":
-    import sys
-    root = sys.argv[1] if len(sys.argv) > 1 else "."
-    walk(root)
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description='Generate LRC tracklists from Mixcloud API and embed/save them.'
+    )
+    parser.add_argument('directory', nargs='?', default='.',
+                        help='Directory to process (default: current directory)')
+    parser.add_argument('--no-embed', action='store_true',
+                        help='Skip embedding lyrics in MP3 USLT tag')
+    parser.add_argument('--write-lrc', action='store_true',
+                        help='Write separate .lrc files (default: embed only)')
+    
+    args = parser.parse_args()
+    
+    embed = not args.no_embed
+    write_file = args.write_lrc
+    
+    if not embed and not write_file:
+        print("Nothing to do: both --no-embed and no --write-lrc specified")
+    else:
+        walk(args.directory, embed=embed, write_file=write_file)

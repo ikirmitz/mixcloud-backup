@@ -268,12 +268,13 @@ def download_track(url: str, output_dir: Path, archive_path: Path, codec: str, p
     return None
 
 
-def download_playlist(playlist_url: str, playlist_title: str, output_dir: Path, archive_path: Path, generate_lrc: bool = True) -> list[Path]:
+def download_playlist(playlist_url: str, playlist_title: str, output_dir: Path, archive_path: Path, embed_lyrics: bool = True, write_lrc: bool = False) -> list[Path]:
     """
     Download all tracks from a playlist with conditional quality.
     
     Args:
-        generate_lrc: If True, generate LRC file immediately after each track
+        embed_lyrics: If True, embed LRC content as USLT tag (default: True)
+        write_lrc: If True, write separate .lrc file (default: False)
     
     Returns list of paths to successfully downloaded MP3 files.
     """
@@ -311,13 +312,13 @@ def download_playlist(playlist_url: str, playlist_title: str, output_dir: Path, 
             downloaded_files.append(mp3_path)
             print(f"  ✓ Ready: {mp3_path}")
             
-            # Generate LRC immediately
-            if generate_lrc:
-                print(f"  Generating LRC...")
+            # Generate LRC / embed lyrics
+            if embed_lyrics or write_lrc:
+                print(f"  Processing tracklist...")
                 try:
-                    process_mp3(mp3_path)
+                    process_mp3(mp3_path, embed=embed_lyrics, write_file=write_lrc)
                 except Exception as e:
-                    print(f"  LRC error: {e}")
+                    print(f"  Tracklist error: {e}")
     
     return downloaded_files
 
@@ -363,8 +364,10 @@ Quality settings:
     parser.add_argument('--archive', '-a', type=Path,
                         default=Path.home() / 'mixcloud-archive.txt',
                         help='Download archive file to track completed downloads (default: ~/mixcloud-archive.txt)')
-    parser.add_argument('--no-lrc', action='store_true',
-                        help='Skip LRC file generation')
+    parser.add_argument('--no-embed', action='store_true',
+                        help='Skip embedding lyrics in MP3 USLT tag')
+    parser.add_argument('--write-lrc', action='store_true',
+                        help='Write separate .lrc files (default: embed only)')
     parser.add_argument('--dry-run', action='store_true',
                         help='List playlists without downloading')
     
@@ -396,13 +399,17 @@ Quality settings:
     # Download each playlist
     all_downloaded = []
     
+    embed_lyrics = not args.no_embed
+    write_lrc = args.write_lrc
+    
     for playlist in playlists:
         downloaded = download_playlist(
             playlist['url'],
             playlist['title'],
             args.output,
             args.archive,
-            generate_lrc=not args.no_lrc
+            embed_lyrics=embed_lyrics,
+            write_lrc=write_lrc
         )
         all_downloaded.extend(downloaded)
     
@@ -412,8 +419,10 @@ Quality settings:
     print(f"{'='*60}")
     print(f"Playlists processed: {len(playlists)}")
     print(f"Tracks downloaded: {len(all_downloaded)}")
-    if not args.no_lrc:
-        print(f"LRC files generated for new downloads")
+    if embed_lyrics:
+        print(f"Lyrics embedded in MP3 tags")
+    if write_lrc:
+        print(f"LRC files written to disk")
     print(f"Archive file: {args.archive}")
 
 

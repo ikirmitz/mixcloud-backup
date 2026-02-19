@@ -5,7 +5,9 @@
 `mixcloud-lrc` is a Python toolkit for backing up Mixcloud accounts and generating navigation files. It includes:
 
 1. **Automated Downloader** (`mixcloud_downloader.py`) - Downloads all playlists from a Mixcloud account using yt-dlp with intelligent quality selection based on source format
-2. **LRC Generator** (`mixcloud_match_to_lrc.py`) - Converts Mixcloud tracklists into LRC files for chapter navigation in media players
+2. **LRC Generator** (`mixcloud_match_to_lrc.py`) - Fetches Mixcloud tracklists and embeds them as USLT (lyrics) tags in MP3 files
+3. **LRC Embedder** (`embed_lrc.py`) - Embeds existing .lrc files into matching MP3 files
+4. **Orphan Finder** (`mixcloud_orphans.py`) - Finds and downloads tracks that aren't in any playlist
 
 **Purpose**: Backup Mixcloud content with optimal quality settings and enable chapter/track navigation in media players.
 
@@ -16,7 +18,9 @@ mixcloud-lrc/
 ├── src/
 │   ├── mixcloud_common.py          # Shared utilities (API, URL parsing)
 │   ├── mixcloud_downloader.py      # Automated playlist downloader
-│   └── mixcloud_match_to_lrc.py    # LRC file generator
+│   ├── mixcloud_match_to_lrc.py    # LRC generator and embedder
+│   ├── mixcloud_orphans.py         # Orphan track finder
+│   └── embed_lrc.py                # Embed existing LRC files
 ├── main.py                          # Entry point placeholder
 ├── pyproject.toml                   # Project configuration
 ├── README.md                        # User documentation
@@ -68,13 +72,29 @@ mixcloud-lrc/
 
 **Dependencies**:
 - `mutagen.File` - Universal audio metadata reading (supports MP3, MP4/M4A, etc.)
+- `mutagen.id3.ID3`, `mutagen.id3.USLT` - ID3 tag manipulation for lyrics embedding
 - `pathlib.Path` - File system operations
 - `mixcloud_common` - Shared utilities
 
 #### Key Functions
 
-##### `process_mp3(mp3_path: Path) -> None`
+##### `generate_lrc_content(username: str, title: str, sections: list[dict]) -> str`
+**Purpose**: Generate LRC file content from tracklist sections
+**Returns**: Complete LRC content as string with header and timestamped entries
+**Format**: `[ar:username]\n[ti:title]\n\n[MM:SS.CC] 01. Track Title\n...`
+
+##### `embed_lyrics(mp3_path: Path, lrc_content: str) -> bool`
+**Purpose**: Embed LRC content as USLT (unsynchronized lyrics) tag in MP3 file
+**Returns**: True if successful, False otherwise
+**Behavior**: Removes existing USLT tags before adding new one
+
+##### `process_mp3(mp3_path: Path, embed: bool = True, write_file: bool = False) -> None`
 **Purpose**: Main processing logic for a single MP3 file
+
+**Parameters**:
+- `mp3_path`: Path to MP3 file to process
+- `embed`: If True, embed LRC content as USLT tag (default: True)
+- `write_file`: If True, write separate .lrc file (default: False)
 
 **Processing Steps**:
 1. Read audio file and extract duration
@@ -84,7 +104,9 @@ mixcloud-lrc/
 5. Fetch tracklist from API (via `fetch_tracklist`)
 6. Validate section count (minimum 2)
 7. Check for timing data; if missing, calculate evenly-spaced timestamps
-8. Generate LRC file with numbered tracks (e.g., "01. Artist – Song")
+8. Generate LRC content (via `generate_lrc_content`)
+9. Embed as USLT tag if `embed=True`
+10. Write .lrc file if `write_file=True`
 
 **Exit Conditions**:
 - No tags → skip
@@ -92,10 +114,45 @@ mixcloud-lrc/
 - Bad URL format → skip with message
 - Less than 2 sections → skip with message
 - No timing data and no audio duration → skip with message
+- Both `embed=False` and `write_file=False` → skip (nothing to do)
 
-##### `walk(root: str) -> None`
+##### `walk(root: str, embed: bool = True, write_file: bool = False) -> None`
 **Purpose**: Recursively process all MP3 files in directory
+**Parameters**: Same as `process_mp3` for embed and write_file
 **Error Handling**: Catches exceptions for individual files, continues processing
+
+### LRC Embedder: `src/embed_lrc.py`
+
+**Purpose**: Embed existing .lrc files into matching .mp3 files as USLT tags.
+
+**Dependencies**:
+- `pathlib.Path` - File system operations
+- `mixcloud_match_to_lrc.embed_lyrics` - Lyrics embedding function
+
+#### Key Functions
+
+##### `embed_lrc_file(lrc_path: Path) -> bool`
+**Purpose**: Embed a single LRC file into its matching MP3
+**Returns**: True if successful, False if no matching MP3 or error
+**Behavior**: Finds MP3 with same filename (different extension), reads LRC content, embeds as USLT tag
+
+##### `walk(root: str) -> tuple[int, int]`
+**Purpose**: Recursively embed all LRC files in directory
+**Returns**: Tuple of (processed_count, success_count)
+
+#### Command-Line Interface
+
+```bash
+uv run python src/embed_lrc.py [directory]
+```
+
+**Arguments**:
+- `directory`: Optional path to process (default: current directory)
+
+**Behavior**:
+- Finds all `.lrc` files recursively
+- Embeds each into matching `.mp3` file
+- Preserves original `.lrc` files (does not delete them)
 
 ### Downloader Module: `src/mixcloud_downloader.py`
 
@@ -157,7 +214,8 @@ uv run python src/mixcloud_downloader.py USERNAME [options]
 - `username`: Mixcloud account to download from (required)
 - `--output, -o`: Output directory (default: current directory)
 - `--archive, -a`: Download archive file (default: `~/mixcloud-archive.txt`)
-- `--no-lrc`: Skip LRC file generation
+- `--no-embed`: Skip embedding lyrics in MP3 USLT tag
+- `--write-lrc`: Write separate .lrc files (default: embed only)
 - `--dry-run`: List playlists without downloading
 
 #### Output Structure
@@ -166,8 +224,8 @@ uv run python src/mixcloud_downloader.py USERNAME [options]
 {output_dir}/
 ├── {uploader}/
 │   └── {playlist_title}/
-│       ├── {upload_date} - {title}.mp3
-│       └── {upload_date} - {title}.lrc
+│       ├── {upload_date} - {title}.mp3  (with embedded USLT lyrics)
+│       └── {upload_date} - {title}.lrc  (only if --write-lrc used)
 └── metadata/
     └── {uploader}/
         └── {playlist_title}/
@@ -380,9 +438,27 @@ Files are skipped with informative messages for:
 
 ## Command-Line Interface
 
-### Usage
+### LRC Generator Usage
 ```bash
-uv run python src/mixcloud_match_to_lrc.py [directory]
+uv run python src/mixcloud_match_to_lrc.py [directory] [options]
+```
+
+**Arguments**:
+- `directory`: Optional path to process (default: current directory)
+- `--no-embed`: Skip embedding lyrics in MP3 USLT tag
+- `--write-lrc`: Write separate .lrc files (default: embed only)
+
+**Examples**:
+```bash
+uv run python src/mixcloud_match_to_lrc.py                       # Embed lyrics in current directory
+uv run python src/mixcloud_match_to_lrc.py /path/to/podcasts     # Embed lyrics in specific directory
+uv run python src/mixcloud_match_to_lrc.py --write-lrc           # Also write .lrc files
+uv run python src/mixcloud_match_to_lrc.py --no-embed --write-lrc  # Only write files, don't embed
+```
+
+### LRC Embedder Usage
+```bash
+uv run python src/embed_lrc.py [directory]
 ```
 
 **Arguments**:
@@ -390,8 +466,8 @@ uv run python src/mixcloud_match_to_lrc.py [directory]
 
 **Examples**:
 ```bash
-uv run python src/mixcloud_match_to_lrc.py                    # Process current directory
-uv run python src/mixcloud_match_to_lrc.py /path/to/podcasts  # Process specific directory
+uv run python src/embed_lrc.py                    # Embed LRC files in current directory
+uv run python src/embed_lrc.py ~/Music/Mixcloud   # Embed LRC files in specific directory
 ```
 
 ## Dependencies

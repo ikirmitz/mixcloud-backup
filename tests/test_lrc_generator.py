@@ -6,7 +6,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, Mock, MagicMock
 
-from mixcloud_match_to_lrc import process_mp3, walk
+from mixcloud_match_to_lrc import process_mp3, walk, generate_lrc_content, embed_lyrics
 
 
 def create_mock_audio(tags=None, duration=3600.0):
@@ -30,7 +30,7 @@ class TestProcessMp3:
     @patch('mixcloud_match_to_lrc.fetch_tracklist')
     @patch('mixcloud_match_to_lrc.File')
     def test_generates_lrc_file(self, mock_file, mock_fetch, tmp_path):
-        """Successfully generates LRC file with track numbers."""
+        """Successfully generates LRC file when write_file=True."""
         # Setup mock audio file
         mp3_path = tmp_path / "test-mix.mp3"
         mp3_path.touch()
@@ -47,7 +47,7 @@ class TestProcessMp3:
             {"__typename": "TrackSection", "startSeconds": 360, "artistName": "Artist 3", "songName": "Song 3"},
         ]
         
-        process_mp3(mp3_path)
+        process_mp3(mp3_path, embed=False, write_file=True)
         
         # Verify LRC file created
         lrc_path = tmp_path / "test-mix.lrc"
@@ -79,7 +79,7 @@ class TestProcessMp3:
             for i in range(12)
         ]
         
-        process_mp3(mp3_path)
+        process_mp3(mp3_path, embed=False, write_file=True)
         
         content = (tmp_path / "mix.lrc").read_text()
         assert "01. Artist 1" in content
@@ -104,7 +104,7 @@ class TestProcessMp3:
             {"__typename": "ChapterSection", "startSeconds": 600, "chapter": "Main Topic"},
         ]
         
-        process_mp3(mp3_path)
+        process_mp3(mp3_path, embed=False, write_file=True)
         
         content = (tmp_path / "podcast.lrc").read_text()
         assert "01. Introduction" in content
@@ -183,7 +183,7 @@ class TestProcessMp3:
             {"__typename": "TrackSection", "startSeconds": None, "artistName": "A3", "songName": "S3"},
         ]
         
-        process_mp3(mp3_path)
+        process_mp3(mp3_path, embed=False, write_file=True)
         
         content = (tmp_path / "no-timing.lrc").read_text()
         
@@ -216,7 +216,7 @@ class TestProcessMp3:
             {"__typename": "TrackSection", "startSeconds": 300, "artistName": "B", "songName": "T"},
         ]
         
-        process_mp3(mp3_path)
+        process_mp3(mp3_path, embed=False, write_file=True)
         
         assert (tmp_path / "wpub.lrc").exists()
         mock_fetch.assert_called_once_with("user", "wpub-mix")
@@ -269,3 +269,112 @@ class TestWalk:
         captured = capsys.readouterr()
         assert "Error on" in captured.out
         assert "Test error" in captured.out
+
+
+class TestGenerateLrcContent:
+    """Tests for generate_lrc_content function."""
+    
+    def test_basic_track_sections(self):
+        """Generate LRC from track sections."""
+        sections = [
+            {"__typename": "TrackSection", "startSeconds": 0, "artistName": "Artist One", "songName": "Song One"},
+            {"__typename": "TrackSection", "startSeconds": 180.5, "artistName": "Artist Two", "songName": "Song Two"},
+        ]
+        
+        content = generate_lrc_content("testuser", "Test Mix", sections)
+        
+        assert "[ar:testuser]" in content
+        assert "[ti:Test Mix]" in content
+        assert "[00:00.00] 01. Artist One – Song One" in content
+        assert "[03:00.50] 02. Artist Two – Song Two" in content
+    
+    def test_chapter_sections(self):
+        """Generate LRC from chapter sections."""
+        sections = [
+            {"__typename": "ChapterSection", "startSeconds": 0, "chapter": "Introduction"},
+            {"__typename": "ChapterSection", "startSeconds": 300, "chapter": "Main Set"},
+        ]
+        
+        content = generate_lrc_content("dj", "Podcast", sections)
+        
+        assert "[00:00.00] 01. Introduction" in content
+        assert "[05:00.00] 02. Main Set" in content
+    
+    def test_mixed_sections(self):
+        """Generate LRC from mixed section types."""
+        sections = [
+            {"__typename": "ChapterSection", "startSeconds": 0, "chapter": "Intro"},
+            {"__typename": "TrackSection", "startSeconds": 60, "artistName": "Artist", "songName": "Track"},
+        ]
+        
+        content = generate_lrc_content("user", "Mix", sections)
+        
+        assert "[00:00.00] 01. Intro" in content
+        assert "[01:00.00] 02. Artist – Track" in content
+    
+    def test_header_format(self):
+        """LRC header includes artist and title tags."""
+        sections = [
+            {"__typename": "TrackSection", "startSeconds": 0, "artistName": "A", "songName": "B"},
+            {"__typename": "TrackSection", "startSeconds": 60, "artistName": "C", "songName": "D"},
+        ]
+        
+        content = generate_lrc_content("myuser", "My Mix Title", sections)
+        
+        lines = content.split('\n')
+        assert lines[0] == "[ar:myuser]"
+        assert lines[1] == "[ti:My Mix Title]"
+        assert lines[2] == ""  # Blank line after header
+
+
+class TestEmbedLyrics:
+    """Tests for embed_lyrics function."""
+    
+    @patch('mixcloud_match_to_lrc.ID3')
+    def test_embed_success(self, mock_id3_class):
+        """Successfully embed lyrics."""
+        mock_audio = MagicMock()
+        mock_id3_class.return_value = mock_audio
+        
+        result = embed_lyrics(Path("/test/file.mp3"), "[ar:test]\nLyrics content")
+        
+        assert result is True
+        mock_audio.delall.assert_called_once_with('USLT')
+        mock_audio.add.assert_called_once()
+        mock_audio.save.assert_called_once()
+    
+    @patch('mixcloud_match_to_lrc.ID3')
+    def test_embed_removes_existing_uslt(self, mock_id3_class):
+        """Existing USLT tags are removed before adding new one."""
+        mock_audio = MagicMock()
+        mock_id3_class.return_value = mock_audio
+        
+        embed_lyrics(Path("/test/file.mp3"), "content")
+        
+        # Verify delall called before add
+        mock_audio.delall.assert_called_once_with('USLT')
+        mock_audio.add.assert_called_once()
+    
+    @patch('mixcloud_match_to_lrc.ID3')
+    def test_embed_failure_returns_false(self, mock_id3_class):
+        """Returns False on save error."""
+        mock_audio = MagicMock()
+        mock_audio.save.side_effect = Exception("Write error")
+        mock_id3_class.return_value = mock_audio
+        
+        result = embed_lyrics(Path("/test/file.mp3"), "content")
+        
+        assert result is False
+    
+    @patch('mixcloud_match_to_lrc.ID3')
+    def test_embed_creates_new_id3_on_load_error(self, mock_id3_class):
+        """Creates new ID3 object if file has no tags."""
+        # First call raises (loading existing), second returns new mock
+        mock_audio = MagicMock()
+        mock_id3_class.side_effect = [Exception("No ID3 header"), mock_audio]
+        
+        result = embed_lyrics(Path("/test/file.mp3"), "content")
+        
+        # Should have tried twice: first load, then create new
+        assert mock_id3_class.call_count == 2
+        assert result is True

@@ -48,6 +48,48 @@ query UserPlaylists($lookup: UserLookup!, $first: Int!, $after: String) {
 }
 """
 
+# GraphQL query for fetching all user uploads
+USER_UPLOADS_QUERY = """
+query UserUploads($lookup: UserLookup!, $first: Int!, $after: String) {
+  userLookup(lookup: $lookup) {
+    uploads(first: $first, after: $after) {
+      edges {
+        node {
+          name
+          slug
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
+"""
+
+# GraphQL query for fetching playlist items (tracks in a playlist)
+PLAYLIST_ITEMS_QUERY = """
+query PlaylistItems($lookup: PlaylistLookup!, $first: Int!, $after: String) {
+  playlistLookup(lookup: $lookup) {
+    items(first: $first, after: $after) {
+      edges {
+        node {
+          cloudcast {
+            name
+            slug
+          }
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
+"""
+
 
 def extract_lookup(url: str) -> tuple[str | None, str | None]:
     """
@@ -203,6 +245,155 @@ def fetch_user_playlists(username: str) -> list[dict] | None:
                 break
         
         return all_playlists
+    
+    except requests.RequestException as e:
+        print(f"Network error: {e}")
+        return None
+
+
+def fetch_user_uploads(username: str) -> list[dict] | None:
+    """
+    Fetch all uploads (cloudcasts) for a Mixcloud user via GraphQL API.
+    
+    Handles pagination automatically to retrieve all uploads.
+    
+    Args:
+        username: Mixcloud username
+    
+    Returns:
+        List of upload dicts with keys:
+        - name: Upload title
+        - slug: URL slug for the upload
+        
+        Returns None if user not found or API error.
+    """
+    all_uploads = []
+    after_cursor = None
+    
+    try:
+        while True:
+            resp = requests.post(
+                GRAPHQL_URL,
+                json={
+                    "query": USER_UPLOADS_QUERY,
+                    "variables": {
+                        "lookup": {"username": username},
+                        "first": 50,
+                        "after": after_cursor
+                    }
+                },
+                headers={
+                    "origin": "https://www.mixcloud.com",
+                    "referer": "https://www.mixcloud.com/"
+                },
+                timeout=30
+            )
+            
+            if resp.status_code != 200:
+                print(f"API error: HTTP {resp.status_code}")
+                return None
+            
+            data = resp.json()
+            user_data = data.get("data", {}).get("userLookup")
+            
+            if user_data is None:
+                print(f"User not found on Mixcloud: {username}")
+                return None
+            
+            uploads_data = user_data.get("uploads", {})
+            edges = uploads_data.get("edges", [])
+            
+            for edge in edges:
+                node = edge.get("node", {})
+                all_uploads.append({
+                    "name": node.get("name", "Unknown"),
+                    "slug": node.get("slug", "")
+                })
+            
+            # Check for more pages
+            page_info = uploads_data.get("pageInfo", {})
+            if page_info.get("hasNextPage"):
+                after_cursor = page_info.get("endCursor")
+            else:
+                break
+        
+        return all_uploads
+    
+    except requests.RequestException as e:
+        print(f"Network error: {e}")
+        return None
+
+
+def fetch_playlist_items(username: str, playlist_slug: str) -> list[dict] | None:
+    """
+    Fetch all items (cloudcasts) in a playlist via GraphQL API.
+    
+    Handles pagination automatically to retrieve all items.
+    
+    Args:
+        username: Mixcloud username (owner of the playlist)
+        playlist_slug: URL slug for the playlist
+    
+    Returns:
+        List of cloudcast dicts with keys:
+        - name: Cloudcast title
+        - slug: URL slug for the cloudcast
+        
+        Returns None if playlist not found or API error.
+    """
+    all_items = []
+    after_cursor = None
+    
+    try:
+        while True:
+            resp = requests.post(
+                GRAPHQL_URL,
+                json={
+                    "query": PLAYLIST_ITEMS_QUERY,
+                    "variables": {
+                        "lookup": {"username": username, "slug": playlist_slug},
+                        "first": 50,
+                        "after": after_cursor
+                    }
+                },
+                headers={
+                    "origin": "https://www.mixcloud.com",
+                    "referer": "https://www.mixcloud.com/"
+                },
+                timeout=30
+            )
+            
+            if resp.status_code != 200:
+                print(f"API error: HTTP {resp.status_code}")
+                return None
+            
+            data = resp.json()
+            playlist_data = data.get("data", {}).get("playlistLookup")
+            
+            if playlist_data is None:
+                print(f"Playlist not found on Mixcloud: {username}/{playlist_slug}")
+                return None
+            
+            items_data = playlist_data.get("items", {})
+            edges = items_data.get("edges", [])
+            
+            for edge in edges:
+                cloudcast = edge.get("node", {}).get("cloudcast")
+                if cloudcast is None:
+                    continue  # Skip items with null cloudcast (e.g., deleted tracks)
+                all_items.append({
+                    "name": cloudcast.get("name", "Unknown"),
+                    "slug": cloudcast.get("slug", "")
+                })
+            
+            # Check for more pages
+            page_info = items_data.get("pageInfo", {})
+            if page_info.get("hasNextPage"):
+                after_cursor = page_info.get("endCursor")
+            else:
+                break
+        
+        return all_items
     
     except requests.RequestException as e:
         print(f"Network error: {e}")
