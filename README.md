@@ -161,6 +161,22 @@ The API didn't provide timestamps and the audio duration couldn't be read.
 - No retry logic for network failures
 - WebM containers do not support embedded lyrics tags here; `.lrc` is used instead
 
+## Legal Disclaimer
+
+**For Personal Use Only**: This tool is intended for backing up your own Mixcloud content or content you have permission to download. Users are solely responsible for ensuring their use complies with:
+
+- Mixcloud's Terms of Service
+- Copyright laws in their jurisdiction
+- Rights of content creators and copyright holders
+
+**No Warranty**: This software is provided "as is" without warranty of any kind. Downloaded content may be subject to copyright protection. The authors and contributors are not responsible for any misuse of this tool.
+
+**Respect Content Creators**: Please support artists and DJs by streaming their content on Mixcloud when possible. This tool is meant for personal archival purposes, not for redistribution or commercial use.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
 ## Technical Details
 
 For developers and LLMs: See [agents.md](agents.md) for detailed technical documentation including API schemas, function signatures, validation rules, and modification points.
