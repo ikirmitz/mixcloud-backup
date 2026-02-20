@@ -175,7 +175,9 @@ The API didn't provide timestamps and the audio duration couldn't be read.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0) - see the [LICENSE](LICENSE) file for details.
+
+**Commercial use is prohibited.** 
 
 ## Technical Details
 
