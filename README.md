@@ -1,28 +1,45 @@
 # mixcloud-lrc
 
-A toolkit for backing up your Mixcloud account — downloads playlists with optimal quality, and adds tracklist navigation to MP3 files via embedded lyrics tags.
+A toolkit for backing up your Mixcloud account — downloads uploads with optimal quality, and adds tracklist navigation to audio files via embedded lyrics tags or `.lrc` files.
 
 ## Tools
 
-### 1. Playlist Downloader
+### 1. Downloader
 
-Download all playlists from a Mixcloud account. Source codec is detected per-track to choose the right MP3 quality (avoiding bloated files from low-quality sources).
+Download all uploads from a Mixcloud account (default). Use `--playlists` to organize by playlist instead. Source codec is detected per-track only when transcoding to MP3.
+Uploads that show on a host profile are resolved using the canonical Mixcloud URL, so host-attributed shows download correctly.
 
 ```bash
 uv run python src/mixcloud_downloader.py USERNAME
+
+# Download by playlist instead of uploads
+uv run python src/mixcloud_downloader.py USERNAME --playlists
+
+# Download latest 25 uploads
+uv run python src/mixcloud_downloader.py USERNAME --limit 25
+
+# Download uploads since a date
+uv run python src/mixcloud_downloader.py USERNAME --since 2024-01-01
+
+# Apply limits in playlist mode too
+uv run python src/mixcloud_downloader.py USERNAME --playlists --limit 50 --since 2024-01-01
 ```
 
-Tracklists from the Mixcloud API are automatically embedded as lyrics (USLT tag) in each downloaded MP3, so media players can display track/chapter navigation. No extra steps needed.
+Tracklists from the Mixcloud API are embedded as lyrics when the file format supports it: MP3 (USLT), M4A/MP4 (©lyr), and Ogg/Opus (Vorbis comments). For unsupported formats, a `.lrc` file is written instead.
 
 | Option | Description |
 |--------|-------------|
 | `--output, -o` | Output directory (default: current directory) |
 | `--archive, -a` | Archive file to skip already-downloaded tracks (default: `~/mixcloud-archive.txt`) |
-| `--dry-run` | List playlists without downloading |
+| `--playlists` | Download by playlist (default: all uploads) |
+| `--to-mp3` | Transcode audio to MP3 (default: keep original container) |
+| `--dry-run` | List uploads or playlists without downloading |
 | `--no-embed` | Skip tracklist embedding |
 | `--write-lrc` | Also write separate `.lrc` files alongside MP3s |
+| `--limit` | Limit number of tracks to download |
+| `--since` | Only download uploads on/after `YYYY-MM-DD` |
 
-**Quality selection:**
+**MP3 quality selection (only with --to-mp3):**
 
 | Source Format | MP3 Quality | Typical Bitrate |
 |--------------|-------------|-----------------|
@@ -33,9 +50,11 @@ Tracklists from the Mixcloud API are automatically embedded as lyrics (USLT tag)
 ```
 ./
 ├── Uploader/
-│   └── Playlist Name/
-│       ├── 20240101 - Mix Title.mp3  (with embedded tracklist)
-│       └── 20240101 - Mix Title.lrc  (only with --write-lrc)
+│   └── Uploads/ or Playlist Name/
+│       ├── 20240101 - Mix Title.opus  (default: original container)
+│       ├── 20240101 - Mix Title.m4a   (older uploads)
+│       ├── 20240101 - Mix Title.mp3   (with --to-mp3)
+│       └── 20240101 - Mix Title.lrc   (when embedding isn't possible or with --write-lrc)
 └── metadata/
     └── Uploader/
         └── Playlist Name/
@@ -59,12 +78,13 @@ uv run python src/mixcloud_orphans.py USERNAME --download
 | `--download` | Download orphan tracks (default: just list them) |
 | `--output, -o` | Output directory |
 | `--archive, -a` | Archive file |
+| `--to-mp3` | Transcode audio to MP3 (default: keep original container) |
 | `--no-embed` | Skip tracklist embedding |
 | `--write-lrc` | Write separate `.lrc` files |
 
 ### 3. Tracklist Generator
 
-For MP3 files you already have — fetches tracklists from the Mixcloud API and embeds them as lyrics.
+For audio files you already have — fetches tracklists from the Mixcloud API and embeds them as lyrics. Supports `.mp3`, `.m4a`, `.mp4`, `.opus`, `.ogg`, and `.oga`.
 
 ```bash
 uv run python src/mixcloud_match_to_lrc.py /path/to/your/music
@@ -72,16 +92,16 @@ uv run python src/mixcloud_match_to_lrc.py /path/to/your/music
 
 This is useful for existing collections that weren't downloaded with the downloader above.
 
-**Requires**: Each MP3 must have a Mixcloud URL in its metadata tags (`TXXX:purl`, `purl`, `WXXX:purl`, `WPUB`, `WOAS`, or `comment`). Files downloaded with yt-dlp from Mixcloud already have this.
+**Requires**: Each file must have a Mixcloud URL in its metadata tags (`TXXX:purl`, `purl`, `url`, `WXXX:purl`, `WPUB`, `WOAS`, or `comment`). Files downloaded with yt-dlp from Mixcloud already have this.
 
 | Option | Description |
 |--------|-------------|
-| `--no-embed` | Skip embedding lyrics in MP3 USLT tag |
+| `--no-embed` | Skip embedding lyrics in audio tags |
 | `--write-lrc` | Write separate `.lrc` files (default: embed only) |
 
 ### 4. LRC Embedder
 
-Embed existing `.lrc` files into their matching `.mp3` files (same filename, different extension). Original `.lrc` files are preserved.
+Embed existing `.lrc` files into their matching audio files (same filename, different extension). Original `.lrc` files are preserved.
 
 ```bash
 uv run python src/embed_lrc.py /path/to/your/music
@@ -112,7 +132,7 @@ Tracklists are stored in [LRC format](https://en.wikipedia.org/wiki/LRC_(file_fo
 [12:45.20] 03. Artist Three – Song Three
 ```
 
-This content is embedded directly in the MP3's USLT (lyrics) tag, making it portable with the file. Optionally, it can also be written as a separate `.lrc` file.
+This content is embedded directly in the audio file when supported (MP3 USLT, M4A/MP4 ©lyr, Ogg/Opus Vorbis comments). For unsupported formats, the downloader writes a `.lrc` file instead. Optionally, `.lrc` files can always be written with `--write-lrc`.
 
 When the Mixcloud API doesn't provide timestamps, they're calculated as evenly-spaced intervals based on the file duration. Files with fewer than 2 sections are skipped.
 
@@ -139,6 +159,7 @@ The API didn't provide timestamps and the audio duration couldn't be read.
 - Overwrites existing `.lrc` files without warning
 - Processes files sequentially (not in parallel)
 - No retry logic for network failures
+- WebM containers do not support embedded lyrics tags here; `.lrc` is used instead
 
 ## Technical Details
 

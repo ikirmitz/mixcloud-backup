@@ -1,12 +1,13 @@
 """
-Embed existing LRC files into matching MP3 files as USLT tags.
+Embed existing LRC files into matching audio files as lyrics tags.
 
 Usage:
     uv run python src/embed_lrc.py [directory]
     
 This script finds all .lrc files and embeds their contents into
-the matching .mp3 file (same name, different extension).
+the matching audio file (same name, different extension).
 
+Supported formats: .mp3, .m4a, .mp4, .opus, .ogg, .oga
 The original .lrc files are preserved (not deleted).
 """
 
@@ -15,9 +16,18 @@ from pathlib import Path
 
 # Import embed function from LRC generator
 try:
-    from .mixcloud_match_to_lrc import embed_lyrics
+    from .mixcloud_match_to_lrc import embed_lyrics_any
 except ImportError:
-    from mixcloud_match_to_lrc import embed_lyrics
+    from mixcloud_match_to_lrc import embed_lyrics_any
+
+
+def _find_matching_audio(lrc_path: Path) -> Path | None:
+    base = lrc_path.with_suffix("")
+    for ext in (".mp3", ".m4a", ".mp4", ".opus", ".ogg", ".oga"):
+        candidate = base.with_suffix(ext)
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def embed_lrc_file(lrc_path: Path) -> bool:
@@ -30,10 +40,10 @@ def embed_lrc_file(lrc_path: Path) -> bool:
     Returns:
         True if successful, False otherwise
     """
-    mp3_path = lrc_path.with_suffix(".mp3")
+    audio_path = _find_matching_audio(lrc_path)
     
-    if not mp3_path.exists():
-        print(f"  Skipping (no matching MP3): {lrc_path.name}")
+    if not audio_path:
+        print(f"  Skipping (no matching audio file): {lrc_path.name}")
         return False
     
     try:
@@ -42,9 +52,10 @@ def embed_lrc_file(lrc_path: Path) -> bool:
         print(f"  Error reading LRC: {e}")
         return False
     
-    if embed_lyrics(mp3_path, lrc_content):
-        print(f"  ✓ Embedded: {mp3_path.name}")
+    if embed_lyrics_any(audio_path, lrc_content):
+        print(f"  ✓ Embedded: {audio_path.name}")
         return True
+    print(f"  Skipping (embedding not supported): {audio_path.name}")
     return False
 
 
@@ -72,7 +83,7 @@ def walk(root: str) -> tuple[int, int]:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Embed existing LRC files into matching MP3 files.',
+        description='Embed existing LRC files into matching audio files.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -88,7 +99,7 @@ Note: Original .lrc files are preserved (not deleted).
     
     args = parser.parse_args()
     
-    print(f"Embedding LRC files as USLT tags")
+    print("Embedding LRC files as lyrics tags")
     print(f"Directory: {Path(args.directory).resolve()}")
     print()
     

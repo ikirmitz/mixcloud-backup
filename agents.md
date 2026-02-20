@@ -4,9 +4,9 @@
 
 `mixcloud-lrc` is a Python toolkit for backing up Mixcloud accounts and generating navigation files. It includes:
 
-1. **Automated Downloader** (`mixcloud_downloader.py`) - Downloads all playlists from a Mixcloud account using yt-dlp with intelligent quality selection based on source format
-2. **LRC Generator** (`mixcloud_match_to_lrc.py`) - Fetches Mixcloud tracklists and embeds them as USLT (lyrics) tags in MP3 files
-3. **LRC Embedder** (`embed_lrc.py`) - Embeds existing .lrc files into matching MP3 files
+1. **Automated Downloader** (`mixcloud_downloader.py`) - Downloads all uploads by default (or playlists with `--playlists`) using yt-dlp with intelligent quality selection when transcoding
+2. **LRC Generator** (`mixcloud_match_to_lrc.py`) - Fetches Mixcloud tracklists and embeds them as lyrics tags in MP3/M4A/Opus files
+3. **LRC Embedder** (`embed_lrc.py`) - Embeds existing .lrc files into matching audio files
 4. **Orphan Finder** (`mixcloud_orphans.py`) - Finds and downloads tracks that aren't in any playlist
 
 **Purpose**: Backup Mixcloud content with optimal quality settings and enable chapter/track navigation in media players.
@@ -88,6 +88,13 @@ mixcloud-lrc/
 **Returns**: True if successful, False otherwise
 **Behavior**: Removes existing USLT tags before adding new one
 
+##### `embed_lyrics_any(audio_path: Path, lrc_content: str) -> bool`
+**Purpose**: Embed LRC content based on container type
+**Supported formats**:
+- MP3 → USLT
+- M4A/MP4 → ©lyr
+- Ogg/Opus → Vorbis comments (LYRICS)
+
 ##### `process_mp3(mp3_path: Path, embed: bool = True, write_file: bool = False) -> None`
 **Purpose**: Main processing logic for a single MP3 file
 
@@ -123,7 +130,7 @@ mixcloud-lrc/
 
 ### LRC Embedder: `src/embed_lrc.py`
 
-**Purpose**: Embed existing .lrc files into matching .mp3 files as USLT tags.
+**Purpose**: Embed existing .lrc files into matching audio files as lyrics tags.
 
 **Dependencies**:
 - `pathlib.Path` - File system operations
@@ -132,9 +139,9 @@ mixcloud-lrc/
 #### Key Functions
 
 ##### `embed_lrc_file(lrc_path: Path) -> bool`
-**Purpose**: Embed a single LRC file into its matching MP3
-**Returns**: True if successful, False if no matching MP3 or error
-**Behavior**: Finds MP3 with same filename (different extension), reads LRC content, embeds as USLT tag
+**Purpose**: Embed a single LRC file into its matching audio file
+**Returns**: True if successful, False if no matching audio file or error
+**Behavior**: Finds audio file with same filename (different extension), reads LRC content, embeds as lyrics tag
 
 ##### `walk(root: str) -> tuple[int, int]`
 **Purpose**: Recursively embed all LRC files in directory
@@ -151,7 +158,7 @@ uv run python src/embed_lrc.py [directory]
 
 **Behavior**:
 - Finds all `.lrc` files recursively
-- Embeds each into matching `.mp3` file
+- Embeds each into matching audio file (.mp3, .m4a, .mp4, .opus, .ogg, .oga)
 - Preserves original `.lrc` files (does not delete them)
 
 ### Downloader Module: `src/mixcloud_downloader.py`
@@ -168,6 +175,11 @@ uv run python src/embed_lrc.py [directory]
 **Method**: Uses Mixcloud GraphQL API via `fetch_user_playlists()` from mixcloud_common
 **Returns**: List of dicts with `url` and `title` keys
 
+##### `get_user_uploads(username: str) -> list[dict]`
+**Purpose**: Fetch all upload URLs and titles for a Mixcloud user
+**Method**: Uses Mixcloud GraphQL API via `fetch_user_uploads()` from mixcloud_common
+**Returns**: List of dicts with `url` and `title` keys
+
 ##### `get_playlist_entries(playlist_url: str) -> list[dict]`
 **Purpose**: Get all track entries from a single playlist
 **Method**: Uses yt-dlp's `extract_flat` mode
@@ -178,8 +190,8 @@ uv run python src/embed_lrc.py [directory]
 **Method**: Uses `yt_dlp.YoutubeDL.extract_info(url, download=False)` to inspect formats
 **Returns**: `'opus'` for webm/opus, `'aac'` for m4a/aac, `'unknown'` if detection fails
 
-##### `download_track(url: str, output_dir: Path, archive_path: Path, codec: str) -> Path | None`
-**Purpose**: Download single track with codec-appropriate quality settings
+##### `download_track(url: str, output_dir: Path, archive_path: Path, codec: str, to_mp3: bool = False) -> Path | None`
+**Purpose**: Download single track with optional MP3 transcoding
 **Quality Mapping**:
 - `opus` → `-q:a 0` (best quality, ~245 kbps VBR)
 - `aac` → `-q:a 2` (medium quality, ~170 kbps VBR)
@@ -193,8 +205,8 @@ uv run python src/embed_lrc.py [directory]
 - `download_archive`: Track completed downloads
 - `sleep_interval`: 2-5 seconds between downloads
 
-##### `download_playlist(playlist_url: str, playlist_title: str, output_dir: Path, archive_path: Path) -> list[Path]`
-**Purpose**: Download all tracks from a playlist with conditional quality
+##### `download_playlist(playlist_url: str, playlist_title: str, output_dir: Path, archive_path: Path, to_mp3: bool = False, limit: int | None = None, since_date: date | None = None) -> list[Path]`
+**Purpose**: Download all tracks from a playlist with optional transcoding
 **Process**:
 1. Fetch playlist entries
 2. For each track: detect codec → download with appropriate quality
@@ -214,8 +226,12 @@ uv run python src/mixcloud_downloader.py USERNAME [options]
 - `username`: Mixcloud account to download from (required)
 - `--output, -o`: Output directory (default: current directory)
 - `--archive, -a`: Download archive file (default: `~/mixcloud-archive.txt`)
+- `--playlists`: Download by playlist (default: all uploads)
+- `--to-mp3`: Transcode audio to MP3 (default: keep original container)
 - `--no-embed`: Skip embedding lyrics in MP3 USLT tag
 - `--write-lrc`: Write separate .lrc files (default: embed only)
+- `--limit`: Limit number of tracks to download
+- `--since`: Only download uploads on/after `YYYY-MM-DD`
 - `--dry-run`: List playlists without downloading
 
 #### Output Structure
@@ -223,13 +239,14 @@ uv run python src/mixcloud_downloader.py USERNAME [options]
 ```
 {output_dir}/
 ├── {uploader}/
-│   └── {playlist_title}/
-│       ├── {upload_date} - {title}.mp3  (with embedded USLT lyrics)
-│       └── {upload_date} - {title}.lrc  (only if --write-lrc used)
+│   └── Uploads/ or {playlist_title}/
+│       ├── {upload_date} - {title}.opus (default: original container)
+│       ├── {upload_date} - {title}.mp3  (with --to-mp3)
+│       └── {upload_date} - {title}.lrc  (when embedding isn't possible or with --write-lrc)
 └── metadata/
-    └── {uploader}/
-        └── {playlist_title}/
-            └── {upload_date} - {title}.info.json
+  └── {uploader}/
+    └── Uploads/ or {playlist_title}/
+      └── {upload_date} - {title}.info.json
 ```
 
 ## GraphQL API Integration
@@ -325,7 +342,7 @@ query UserPlaylists($lookup: UserLookup!, $first: Int!, $after: String) {
 
 ## Data Flow
 
-1. **Input**: MP3 file with metadata containing Mixcloud URL
+1. **Input**: Audio file with metadata containing Mixcloud URL (MP3/M4A/Opus)
 2. **Audio Duration**: Extract file duration using mutagen
 3. **Tag Extraction**: Check TXXX:purl, purl, WPUB, WOAS, WXXX:purl, comment tags
 4. **URL Parsing**: Extract username and slug using regex

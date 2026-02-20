@@ -6,7 +6,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, Mock, MagicMock
 
-from mixcloud_match_to_lrc import process_mp3, walk, generate_lrc_content, embed_lyrics
+from mixcloud_match_to_lrc import process_mp3, walk, generate_lrc_content, embed_lyrics, embed_lyrics_any
 
 
 def create_mock_audio(tags=None, duration=3600.0):
@@ -378,3 +378,66 @@ class TestEmbedLyrics:
         # Should have tried twice: first load, then create new
         assert mock_id3_class.call_count == 2
         assert result is True
+
+
+class TestEmbedLyricsAny:
+    """Tests for embed_lyrics_any multi-format embedding."""
+    
+    @patch('mixcloud_match_to_lrc.MP4')
+    def test_embeds_mp4_lyrics(self, mock_mp4_class, tmp_path):
+        """Writes MP4 lyrics to ©lyr tag."""
+        audio_path = tmp_path / "test.m4a"
+        audio_path.touch()
+        
+        mock_audio = MagicMock()
+        mock_audio.tags = {}
+        mock_mp4_class.return_value = mock_audio
+        
+        result = embed_lyrics_any(audio_path, "lrc content")
+        
+        assert result is True
+        assert "\xa9lyr" in mock_audio.tags
+        mock_audio.save.assert_called_once()
+    
+    @patch('mixcloud_match_to_lrc.OggOpus')
+    def test_embeds_ogg_opus_lyrics(self, mock_ogg_opus_class, tmp_path):
+        """Writes Ogg Opus lyrics to vorbis comment."""
+        audio_path = tmp_path / "test.opus"
+        audio_path.touch()
+        
+        mock_audio = MagicMock()
+        mock_audio.tags = {}
+        mock_ogg_opus_class.return_value = mock_audio
+        
+        result = embed_lyrics_any(audio_path, "lrc content")
+        
+        assert result is True
+        assert "lyrics" in mock_audio.tags
+        mock_audio.save.assert_called_once()
+    
+    @patch('mixcloud_match_to_lrc.OggVorbis')
+    @patch('mixcloud_match_to_lrc.OggOpus')
+    def test_falls_back_to_ogg_vorbis(self, mock_ogg_opus_class, mock_ogg_vorbis_class, tmp_path):
+        """Falls back to Ogg Vorbis when Ogg Opus fails."""
+        audio_path = tmp_path / "test.ogg"
+        audio_path.touch()
+        
+        mock_ogg_opus_class.side_effect = Exception("Not Opus")
+        mock_audio = MagicMock()
+        mock_audio.tags = {}
+        mock_ogg_vorbis_class.return_value = mock_audio
+        
+        result = embed_lyrics_any(audio_path, "lrc content")
+        
+        assert result is True
+        assert "lyrics" in mock_audio.tags
+        mock_audio.save.assert_called_once()
+    
+    def test_returns_false_for_unsupported(self, tmp_path):
+        """Returns False for unsupported formats."""
+        audio_path = tmp_path / "test.wav"
+        audio_path.touch()
+        
+        result = embed_lyrics_any(audio_path, "lrc content")
+        
+        assert result is False

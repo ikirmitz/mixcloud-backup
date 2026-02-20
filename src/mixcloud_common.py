@@ -57,6 +57,7 @@ query UserUploads($lookup: UserLookup!, $first: Int!, $after: String) {
         node {
           name
           slug
+                    url
         }
       }
       pageInfo {
@@ -307,7 +308,9 @@ def fetch_user_uploads(username: str) -> list[dict] | None:
                 node = edge.get("node", {})
                 all_uploads.append({
                     "name": node.get("name", "Unknown"),
-                    "slug": node.get("slug", "")
+                    "slug": node.get("slug", ""),
+                    "url": node.get("url"),
+                    "owner_username": None,
                 })
             
             # Check for more pages

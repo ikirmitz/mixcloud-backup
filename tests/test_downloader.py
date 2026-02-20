@@ -8,6 +8,7 @@ from unittest.mock import patch, Mock, MagicMock
 
 from mixcloud_downloader import (
     get_user_playlists,
+    get_user_uploads,
     get_playlist_entries,
     detect_audio_codec,
     extract_codec_from_info,
@@ -98,6 +99,43 @@ class TestGetUserPlaylists:
         playlists = get_user_playlists("testuser")
         
         assert playlists == []
+
+
+class TestGetUserUploads:
+    """Tests for get_user_uploads function."""
+    
+    @patch('mixcloud_downloader.fetch_user_uploads')
+    def test_returns_uploads(self, mock_fetch):
+        """Returns formatted upload dicts with url and title."""
+        mock_fetch.return_value = [
+            {'name': 'Mix One', 'slug': 'mix-one', 'url': 'https://www.mixcloud.com/owner/mix-one/'},
+            {'name': 'Mix Two', 'slug': 'mix-two', 'url': 'https://www.mixcloud.com/owner2/mix-two/'},
+        ]
+        
+        uploads = get_user_uploads("testuser")
+        
+        assert len(uploads) == 2
+        assert uploads[0] == {'url': 'https://www.mixcloud.com/owner/mix-one/', 'title': 'Mix One'}
+        assert uploads[1] == {'url': 'https://www.mixcloud.com/owner2/mix-two/', 'title': 'Mix Two'}
+        mock_fetch.assert_called_once_with("testuser")
+    
+    @patch('mixcloud_downloader.fetch_user_uploads')
+    def test_returns_empty_on_none(self, mock_fetch):
+        """Returns empty list when API returns None."""
+        mock_fetch.return_value = None
+        
+        uploads = get_user_uploads("testuser")
+        
+        assert uploads == []
+    
+    @patch('mixcloud_downloader.fetch_user_uploads')
+    def test_returns_empty_list(self, mock_fetch):
+        """Returns empty list when user has no uploads."""
+        mock_fetch.return_value = []
+        
+        uploads = get_user_uploads("testuser")
+        
+        assert uploads == []
     
     @patch('mixcloud_downloader.fetch_user_playlists')
     def test_returns_empty_list(self, mock_fetch):

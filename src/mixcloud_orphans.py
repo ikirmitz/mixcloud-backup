@@ -10,6 +10,7 @@ Options:
     --download      Download orphan tracks (default: just list them)
     --output, -o    Output directory for downloads
     --archive, -a   Archive file to track downloads
+    --to-mp3        Transcode audio to MP3 (default: keep original container)
     --no-embed      Skip embedding lyrics in MP3 tags
     --write-lrc     Write separate .lrc files
 """
@@ -99,6 +100,8 @@ Examples:
     parser.add_argument('--archive', '-a', type=Path,
                         default=Path.home() / 'mixcloud-archive.txt',
                         help='Download archive file (default: ~/mixcloud-archive.txt)')
+    parser.add_argument('--to-mp3', action='store_true',
+                        help='Transcode audio to MP3 (default: keep original container)')
     parser.add_argument('--no-embed', action='store_true',
                         help='Skip embedding lyrics in MP3 USLT tag')
     parser.add_argument('--write-lrc', action='store_true',
@@ -135,7 +138,8 @@ Examples:
     print(f"{'='*60}")
     for i, track in enumerate(orphan_tracks, 1):
         print(f"  {i:3d}. {track['name']}")
-        print(f"       https://www.mixcloud.com/{args.username}/{track['slug']}/")
+        url = track.get('url') or f"https://www.mixcloud.com/{track.get('owner_username') or args.username}/{track['slug']}/"
+        print(f"       {url}")
     
     if not args.download:
         print(f"\nUse --download to download these {len(orphan_tracks)} tracks")
@@ -153,31 +157,34 @@ Examples:
             extract_codec_from_info,
             download_track,
         )
-        from .mixcloud_match_to_lrc import process_mp3
+        from .mixcloud_match_to_lrc import process_mp3, process_audio_with_url
     except ImportError:
         from mixcloud_downloader import (
             fetch_track_info,
             extract_codec_from_info,
             download_track,
         )
-        from mixcloud_match_to_lrc import process_mp3
+        from mixcloud_match_to_lrc import process_mp3, process_audio_with_url
     
     downloaded_files = []
     
     for i, track in enumerate(orphan_tracks, 1):
-        url = f"https://www.mixcloud.com/{args.username}/{track['slug']}/"
+        url = track.get('url') or f"https://www.mixcloud.com/{track.get('owner_username') or args.username}/{track['slug']}/"
         
         # Fetch full track info
         info = fetch_track_info(url)
         title = info.get('title', track['name']) if info else track['name']
-        codec = extract_codec_from_info(info)
+        codec = extract_codec_from_info(info) if args.to_mp3 else 'unknown'
         
         print(f"\n[{i}/{len(orphan_tracks)}] {title}")
-        quality_desc = "best (opus source)" if codec == 'opus' else "medium (aac source)"
-        print(f"  Codec: {codec} → MP3 quality: {quality_desc}")
+        if args.to_mp3:
+            quality_desc = "best (opus source)" if codec == 'opus' else "medium (aac source)"
+            print(f"  Codec: {codec} → MP3 quality: {quality_desc}")
+        else:
+            print("  Audio: keeping original audio")
         
         # Download with "Orphans" as playlist name
-        mp3_path = download_track(url, args.output, args.archive, codec, "Orphans", info)
+        mp3_path = download_track(url, args.output, args.archive, codec, "Orphans", info, to_mp3=args.to_mp3)
         
         if mp3_path and mp3_path.exists():
             downloaded_files.append(mp3_path)
@@ -187,9 +194,9 @@ Examples:
             embed_lyrics = not args.no_embed
             write_lrc = args.write_lrc
             if embed_lyrics or write_lrc:
-                print(f"  Processing tracklist...")
+                print("  Processing tracklist...")
                 try:
-                    process_mp3(mp3_path, embed=embed_lyrics, write_file=write_lrc)
+                    process_audio_with_url(mp3_path, url, embed=embed_lyrics, write_file=write_lrc)
                 except Exception as e:
                     print(f"  Tracklist error: {e}")
     

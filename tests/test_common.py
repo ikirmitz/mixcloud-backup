@@ -415,8 +415,8 @@ class TestFetchUserUploads:
                 "userLookup": {
                     "uploads": {
                         "edges": [
-                            {"node": {"name": "Mix One", "slug": "mix-one"}},
-                            {"node": {"name": "Mix Two", "slug": "mix-two"}}
+                            {"node": {"name": "Mix One", "slug": "mix-one", "url": "https://www.mixcloud.com/user/mix-one/"}},
+                            {"node": {"name": "Mix Two", "slug": "mix-two", "url": "https://www.mixcloud.com/user/mix-two/"}}
                         ],
                         "pageInfo": {"hasNextPage": False, "endCursor": None}
                     }
@@ -429,8 +429,8 @@ class TestFetchUserUploads:
         
         assert uploads is not None
         assert len(uploads) == 2
-        assert uploads[0] == {"name": "Mix One", "slug": "mix-one"}
-        assert uploads[1] == {"name": "Mix Two", "slug": "mix-two"}
+        assert uploads[0] == {"name": "Mix One", "slug": "mix-one", "url": "https://www.mixcloud.com/user/mix-one/", "owner_username": None}
+        assert uploads[1] == {"name": "Mix Two", "slug": "mix-two", "url": "https://www.mixcloud.com/user/mix-two/", "owner_username": None}
 
     @patch('mixcloud_common.requests.post')
     def test_success_with_pagination(self, mock_post):
