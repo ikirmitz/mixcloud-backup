@@ -29,7 +29,9 @@ def _normalize_tag_value(value) -> str | None:
     if value is None:
         return None
     if hasattr(value, "url"):
-        return str(value.url)
+        url_value = value.url
+        if isinstance(url_value, (str, bytes)) and url_value:
+            return str(url_value)
     if hasattr(value, "text"):
         text = value.text
         if isinstance(text, (list, tuple)) and text:

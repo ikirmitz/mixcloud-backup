@@ -6,7 +6,15 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, Mock, MagicMock
 
-from mixcloud_match_to_lrc import process_mp3, walk, generate_lrc_content, embed_lyrics, embed_lyrics_any
+from mixcloud_match_to_lrc import (
+    process_mp3,
+    walk,
+    generate_lrc_content,
+    embed_lyrics,
+    embed_lyrics_any,
+    extract_mixcloud_url,
+    process_audio_from_tags,
+)
 
 
 def create_mock_audio(tags=None, duration=3600.0):
@@ -225,24 +233,23 @@ class TestProcessMp3:
 class TestWalk:
     """Tests for walk directory scanning function."""
     
-    @patch('mixcloud_match_to_lrc.process_mp3')
-    def test_processes_mp3_files(self, mock_process, tmp_path):
-        """Walk finds and processes MP3 files."""
-        # Create test MP3 files
+    @patch('mixcloud_match_to_lrc.process_audio_from_tags')
+    def test_processes_supported_audio_files(self, mock_process, tmp_path):
+        """Walk finds and processes supported audio files."""
         (tmp_path / "file1.mp3").touch()
-        (tmp_path / "file2.mp3").touch()
+        (tmp_path / "file2.m4a").touch()
+        (tmp_path / "file3.opus").touch()
         (tmp_path / "subdir").mkdir()
-        (tmp_path / "subdir" / "file3.mp3").touch()
+        (tmp_path / "subdir" / "file4.ogg").touch()
         
         walk(str(tmp_path))
         
-        assert mock_process.call_count == 3
+        assert mock_process.call_count == 4
     
-    @patch('mixcloud_match_to_lrc.process_mp3')
-    def test_ignores_non_mp3_files(self, mock_process, tmp_path):
-        """Walk ignores non-MP3 files."""
+    @patch('mixcloud_match_to_lrc.process_audio_from_tags')
+    def test_ignores_unsupported_files(self, mock_process, tmp_path):
+        """Walk ignores unsupported file extensions."""
         (tmp_path / "audio.mp3").touch()
-        (tmp_path / "audio.m4a").touch()
         (tmp_path / "audio.wav").touch()
         (tmp_path / "readme.txt").touch()
         
@@ -250,7 +257,7 @@ class TestWalk:
         
         assert mock_process.call_count == 1
     
-    @patch('mixcloud_match_to_lrc.process_mp3')
+    @patch('mixcloud_match_to_lrc.process_audio_from_tags')
     def test_continues_on_error(self, mock_process, tmp_path, capsys):
         """Walk continues processing after individual file errors."""
         (tmp_path / "file1.mp3").touch()
@@ -441,3 +448,67 @@ class TestEmbedLyricsAny:
         result = embed_lyrics_any(audio_path, "lrc content")
         
         assert result is False
+
+
+class TestExtractMixcloudUrl:
+    """Tests for extract_mixcloud_url helper."""
+    
+    def test_extracts_from_txxx_purl(self):
+        mock_purl = MagicMock()
+        mock_purl.text = ["https://mixcloud.com/user/mix/"]
+        tags = {"TXXX:purl": mock_purl}
+        
+        assert extract_mixcloud_url(tags) == "https://mixcloud.com/user/mix/"
+    
+    def test_extracts_from_wxxx_case_insensitive(self):
+        mock_wxxx = MagicMock()
+        mock_wxxx.url = "https://mixcloud.com/user/wxxx/"
+        tags = {"wXxX:pUrL": mock_wxxx}
+        
+        assert extract_mixcloud_url(tags) == "https://mixcloud.com/user/wxxx/"
+    
+    def test_extracts_from_purl_or_url(self):
+        tags = {"purl": ["https://mixcloud.com/user/purl/"]}
+        assert extract_mixcloud_url(tags) == "https://mixcloud.com/user/purl/"
+        
+        tags = {"url": ["https://mixcloud.com/user/url/"]}
+        assert extract_mixcloud_url(tags) == "https://mixcloud.com/user/url/"
+    
+    def test_extracts_from_comment(self):
+        tags = {"comment": ["see https://mixcloud.com/user/comment/"]}
+        assert extract_mixcloud_url(tags) == "see https://mixcloud.com/user/comment/"
+    
+    def test_returns_none_without_mixcloud(self):
+        tags = {"comment": ["not a match"]}
+        assert extract_mixcloud_url(tags) is None
+
+
+class TestProcessAudioFromTags:
+    """Tests for process_audio_from_tags wrapper."""
+    
+    @patch('mixcloud_match_to_lrc.process_audio_with_url')
+    @patch('mixcloud_match_to_lrc.File')
+    def test_processes_when_url_present(self, mock_file, mock_process, tmp_path):
+        audio_path = tmp_path / "test.m4a"
+        audio_path.touch()
+        
+        tags = {"purl": ["https://mixcloud.com/user/mix/"]}
+        mock_file.return_value = create_mock_audio(tags=tags)
+        
+        process_audio_from_tags(audio_path, embed=True, write_file=False)
+        
+        mock_process.assert_called_once_with(audio_path, "https://mixcloud.com/user/mix/", embed=True, write_file=False)
+    
+    @patch('mixcloud_match_to_lrc.File')
+    def test_skips_when_no_tags(self, mock_file, tmp_path, capsys):
+        audio_path = tmp_path / "test.m4a"
+        audio_path.touch()
+        
+        mock_audio = MagicMock()
+        mock_audio.tags = None
+        mock_file.return_value = mock_audio
+        
+        process_audio_from_tags(audio_path, embed=True, write_file=False)
+        
+        captured = capsys.readouterr()
+        assert "Skipping (no tags in file)" in captured.out
