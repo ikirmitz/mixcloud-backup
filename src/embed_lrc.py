@@ -17,8 +17,10 @@ from pathlib import Path
 # Import embed function from LRC generator
 try:
     from .mixcloud_match_to_lrc import embed_lyrics_any
+    from .console import configure_console, get_console
 except ImportError:
     from mixcloud_match_to_lrc import embed_lyrics_any
+    from console import configure_console, get_console
 
 
 def _find_matching_audio(lrc_path: Path) -> Path | None:
@@ -43,19 +45,19 @@ def embed_lrc_file(lrc_path: Path) -> bool:
     audio_path = _find_matching_audio(lrc_path)
     
     if not audio_path:
-        print(f"  Skipping (no matching audio file): {lrc_path.name}")
+        get_console().warn(f"  Skipping (no matching audio file): {lrc_path.name}")
         return False
     
     try:
         lrc_content = lrc_path.read_text(encoding="utf-8")
     except Exception as e:
-        print(f"  Error reading LRC: {e}")
+        get_console().error(f"  Error reading LRC: {e}")
         return False
     
     if embed_lyrics_any(audio_path, lrc_content):
-        print(f"  ✓ Embedded: {audio_path.name}")
+        get_console().success(f"  ✓ Embedded: {audio_path.name}")
         return True
-    print(f"  Skipping (embedding not supported): {audio_path.name}")
+    get_console().warn(f"  Skipping (embedding not supported): {audio_path.name}")
     return False
 
 
@@ -74,7 +76,7 @@ def walk(root: str) -> tuple[int, int]:
     
     for lrc_path in Path(root).rglob("*.lrc"):
         processed += 1
-        print(f"Processing: {lrc_path}")
+        get_console().info(f"Processing: {lrc_path}")
         if embed_lrc_file(lrc_path):
             success += 1
     
@@ -96,21 +98,27 @@ Note: Original .lrc files are preserved (not deleted).
     
     parser.add_argument('directory', nargs='?', default='.',
                         help='Directory to process (default: current directory)')
+    parser.add_argument('--no-color', action='store_true',
+                        help='Disable colored output')
     
     args = parser.parse_args()
-    
-    print("Embedding LRC files as lyrics tags")
-    print(f"Directory: {Path(args.directory).resolve()}")
-    print()
+
+    configure_console(no_color=args.no_color)
+    console = get_console()
+    console.rule("Embedding LRC files as lyrics tags")
+    console.print(f"Directory: {Path(args.directory).resolve()}")
+    console.print()
     
     processed, success = walk(args.directory)
     
-    print()
-    print(f"{'='*40}")
-    print(f"Processed: {processed} LRC files")
-    print(f"Embedded:  {success} files")
+    console.print()
+    summary_rows = [
+        ("Processed", f"{processed} LRC files"),
+        ("Embedded", f"{success} files"),
+    ]
     if processed > success:
-        print(f"Skipped:   {processed - success} files")
+        summary_rows.append(("Skipped", f"{processed - success} files"))
+    console.summary_table("Summary", summary_rows)
 
 
 if __name__ == "__main__":

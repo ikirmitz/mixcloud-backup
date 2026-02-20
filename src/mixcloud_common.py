@@ -11,6 +11,11 @@ import re
 import requests
 from urllib.parse import unquote
 
+try:
+    from .console import get_console
+except ImportError:
+    from console import get_console
+
 # Mixcloud GraphQL API endpoint
 GRAPHQL_URL = "https://app.mixcloud.com/graphql"
 
@@ -162,20 +167,20 @@ def fetch_tracklist(username: str, slug: str) -> list[dict] | None:
         )
         
         if resp.status_code != 200:
-            print(f"API error: HTTP {resp.status_code}")
+            get_console().error(f"API error: HTTP {resp.status_code}")
             return None
         
         data = resp.json()
         cloudcast = data.get("data", {}).get("cloudcastLookup")
         
         if cloudcast is None:
-            print(f"Cloudcast not found on Mixcloud: {username}/{slug}")
+            get_console().error(f"Cloudcast not found on Mixcloud: {username}/{slug}")
             return None
         
         return cloudcast.get("sections", [])
     
     except requests.RequestException as e:
-        print(f"Network error: {e}")
+        get_console().error(f"Network error: {e}")
         return None
 
 
@@ -218,14 +223,14 @@ def fetch_user_playlists(username: str) -> list[dict] | None:
             )
             
             if resp.status_code != 200:
-                print(f"API error: HTTP {resp.status_code}")
+                get_console().error(f"API error: HTTP {resp.status_code}")
                 return None
             
             data = resp.json()
             user_data = data.get("data", {}).get("userLookup")
             
             if user_data is None:
-                print(f"User not found on Mixcloud: {username}")
+                get_console().error(f"User not found on Mixcloud: {username}")
                 return None
             
             playlists_data = user_data.get("playlists", {})
@@ -248,7 +253,7 @@ def fetch_user_playlists(username: str) -> list[dict] | None:
         return all_playlists
     
     except requests.RequestException as e:
-        print(f"Network error: {e}")
+        get_console().error(f"Network error: {e}")
         return None
 
 
@@ -291,14 +296,14 @@ def fetch_user_uploads(username: str) -> list[dict] | None:
             )
             
             if resp.status_code != 200:
-                print(f"API error: HTTP {resp.status_code}")
+                get_console().error(f"API error: HTTP {resp.status_code}")
                 return None
             
             data = resp.json()
             user_data = data.get("data", {}).get("userLookup")
             
             if user_data is None:
-                print(f"User not found on Mixcloud: {username}")
+                get_console().error(f"User not found on Mixcloud: {username}")
                 return None
             
             uploads_data = user_data.get("uploads", {})
@@ -323,7 +328,7 @@ def fetch_user_uploads(username: str) -> list[dict] | None:
         return all_uploads
     
     except requests.RequestException as e:
-        print(f"Network error: {e}")
+        get_console().error(f"Network error: {e}")
         return None
 
 
@@ -367,14 +372,14 @@ def fetch_playlist_items(username: str, playlist_slug: str) -> list[dict] | None
             )
             
             if resp.status_code != 200:
-                print(f"API error: HTTP {resp.status_code}")
+                get_console().error(f"API error: HTTP {resp.status_code}")
                 return None
             
             data = resp.json()
             playlist_data = data.get("data", {}).get("playlistLookup")
             
             if playlist_data is None:
-                print(f"Playlist not found on Mixcloud: {username}/{playlist_slug}")
+                get_console().error(f"Playlist not found on Mixcloud: {username}/{playlist_slug}")
                 return None
             
             items_data = playlist_data.get("items", {})
@@ -399,5 +404,5 @@ def fetch_playlist_items(username: str, playlist_slug: str) -> list[dict] | None
         return all_items
     
     except requests.RequestException as e:
-        print(f"Network error: {e}")
+        get_console().error(f"Network error: {e}")
         return None

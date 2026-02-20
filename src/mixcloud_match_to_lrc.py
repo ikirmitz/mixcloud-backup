@@ -8,8 +8,10 @@ from mutagen.oggvorbis import OggVorbis
 # Import shared utilities
 try:
     from .mixcloud_common import extract_lookup, format_lrc_timestamp, fetch_tracklist
+    from .console import configure_console, get_console
 except ImportError:
     from mixcloud_common import extract_lookup, format_lrc_timestamp, fetch_tracklist
+    from console import configure_console, get_console
 
 
 SUPPORTED_AUDIO_EXTS = {".mp3", ".m4a", ".mp4", ".opus", ".ogg", ".oga"}
@@ -127,7 +129,7 @@ def embed_lyrics(mp3_path: Path, lrc_content: str) -> bool:
         audio.save(mp3_path)
         return True
     except Exception as e:
-        print(f"  Error embedding lyrics: {e}")
+        get_console().error(f"  Error embedding lyrics: {e}")
         return False
 
 
@@ -143,7 +145,7 @@ def embed_lyrics_mp4(m4a_path: Path, lrc_content: str) -> bool:
         audio.save()
         return True
     except Exception as e:
-        print(f"  Error embedding MP4 lyrics: {e}")
+        get_console().error(f"  Error embedding MP4 lyrics: {e}")
         return False
 
 
@@ -174,7 +176,7 @@ def embed_lyrics_ogg_vorbis(ogg_path: Path, lrc_content: str) -> bool:
         audio.save()
         return True
     except Exception as e:
-        print(f"  Error embedding Ogg lyrics: {e}")
+        get_console().error(f"  Error embedding Ogg lyrics: {e}")
         return False
 
 
@@ -200,39 +202,42 @@ def process_audio_with_url(audio_path: Path, url: str, embed: bool = True, write
     """
     if not embed and not write_file:
         return  # Nothing to do
-    
+    console = get_console()
     audio = File(audio_path)
     if audio is None:
-        print("  Skipping (unsupported audio format)")
+        console.warn("  Skipping (unsupported audio format)")
         return
     
     audio_duration = audio.info.length if hasattr(audio.info, 'length') else None
     user, slug = extract_lookup(url)
     
     if not user or not slug:
-        print(f"  Skipping (bad Mixcloud URL format): {url}")
+        console.warn(f"  Skipping (bad Mixcloud URL format): {url}")
         return
-    
-    print(f"  Fetching tracklist for: {user}/{slug}")
+
+    console.info(f"  Fetching tracklist for: {user}/{slug}")
     sections = fetch_tracklist(user, slug)
-    
+
     if sections is None:
-        print("  Skipping (could not fetch tracklist from API)")
+        console.warn("  Skipping (could not fetch tracklist from API)")
         return
-    
+
     section_count = len(sections)
     if section_count < 2:
-        print(f"  Skipping (only {section_count} section(s) in tracklist)")
+        console.warn(f"  Skipping (only {section_count} section(s) in tracklist)")
         return
-    
+
     timed_sections = [s for s in sections if s.get('startSeconds') is not None]
     if len(timed_sections) < 2 and audio_duration:
-        print(f"  No timing data - calculating evenly-spaced timestamps over {int(audio_duration/60)}:{int(audio_duration%60):02d}")
+        console.info(
+            f"  No timing data - calculating evenly-spaced timestamps over "
+            f"{int(audio_duration/60)}:{int(audio_duration%60):02d}"
+        )
         interval = audio_duration / len(sections)
         for i, s in enumerate(sections):
             s['startSeconds'] = i * interval
     elif len(timed_sections) < 2:
-        print("  Skipping (no timing information and no audio duration)")
+        console.warn("  Skipping (no timing information and no audio duration)")
         return
     
     lrc_content = generate_lrc_content(user, audio_path.stem, sections)
@@ -243,7 +248,7 @@ def process_audio_with_url(audio_path: Path, url: str, embed: bool = True, write
         if embed_lyrics_any(audio_path, lrc_content):
             actions.append("embedded")
         else:
-            print("  Warning: embedding not supported for this format; writing .lrc instead")
+            console.warn("  Warning: embedding not supported for this format; writing .lrc instead")
             fallback_write = True
     
     if write_file or fallback_write:
@@ -253,7 +258,7 @@ def process_audio_with_url(audio_path: Path, url: str, embed: bool = True, write
         actions.append(f"wrote {lrc_path.name}")
     
     action_str = " + ".join(actions)
-    print(f"  ✓ {action_str} ({section_count} tracks)")
+    console.success(f"  ✓ {action_str} ({section_count} tracks)")
 
 
 def process_audio_from_tags(audio_path: Path, embed: bool = True, write_file: bool = False):
@@ -263,14 +268,16 @@ def process_audio_from_tags(audio_path: Path, embed: bool = True, write_file: bo
     if not embed and not write_file:
         return  # Nothing to do
 
+    console = get_console()
+
     audio = File(audio_path)
     if audio is None or audio.tags is None:
-        print("  Skipping (no tags in file)")
+        console.warn("  Skipping (no tags in file)")
         return
 
     url = extract_mixcloud_url(audio.tags)
     if not url:
-        print("  Skipping (no Mixcloud URL in tags)")
+        console.warn("  Skipping (no Mixcloud URL in tags)")
         return
 
     process_audio_with_url(audio_path, url, embed=embed, write_file=write_file)
@@ -305,7 +312,7 @@ def walk(root, embed: bool = True, write_file: bool = False):
         try:
             process_audio_from_tags(path, embed=embed, write_file=write_file)
         except Exception as e:
-            print(f"Error on {path}: {e}")
+            get_console().error(f"Error on {path}: {e}")
 
 
 if __name__ == "__main__":
@@ -320,13 +327,17 @@ if __name__ == "__main__":
                         help='Skip embedding lyrics in MP3 USLT tag')
     parser.add_argument('--write-lrc', action='store_true',
                         help='Write separate .lrc files (default: embed only)')
+    parser.add_argument('--no-color', action='store_true',
+                        help='Disable colored output')
     
     args = parser.parse_args()
+
+    configure_console(no_color=args.no_color)
     
     embed = not args.no_embed
     write_file = args.write_lrc
     
     if not embed and not write_file:
-        print("Nothing to do: both --no-embed and no --write-lrc specified")
+        get_console().warn("Nothing to do: both --no-embed and no --write-lrc specified")
     else:
         walk(args.directory, embed=embed, write_file=write_file)

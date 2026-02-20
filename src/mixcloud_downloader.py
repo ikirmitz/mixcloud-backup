@@ -23,9 +23,11 @@ from yt_dlp.utils import sanitize_filename
 try:
     from .mixcloud_match_to_lrc import process_mp3, process_audio_with_url
     from .mixcloud_common import fetch_user_playlists, fetch_user_uploads
+    from .console import configure_console, get_console
 except ImportError:
     from mixcloud_match_to_lrc import process_mp3, process_audio_with_url
     from mixcloud_common import fetch_user_playlists, fetch_user_uploads
+    from console import configure_console, get_console
 
 
 # Shared yt-dlp options for quiet extraction without downloading
@@ -109,7 +111,7 @@ def _parse_since_date(value: str | None) -> date | None:
         year, month, day = (int(p) for p in parts)
         return date(year, month, day)
     except ValueError:
-        print(f"Invalid --since date format: {value} (expected YYYY-MM-DD)")
+        get_console().warn(f"Invalid --since date format: {value} (expected YYYY-MM-DD)")
         return None
 
 
@@ -118,7 +120,7 @@ def _is_older_than(info: dict | None, since_date: date | None) -> bool:
         return False
     upload_date = info.get('upload_date')
     if not upload_date:
-        print("  Warning: No upload_date available; skipping --since filter")
+        get_console().warn("  Warning: No upload_date available; skipping --since filter")
         return False
     try:
         year = int(upload_date[0:4])
@@ -126,7 +128,7 @@ def _is_older_than(info: dict | None, since_date: date | None) -> bool:
         day = int(upload_date[6:8])
         return date(year, month, day) < since_date
     except ValueError:
-        print("  Warning: Invalid upload_date; skipping --since filter")
+        get_console().warn("  Warning: Invalid upload_date; skipping --since filter")
         return False
 
 
@@ -140,7 +142,7 @@ def get_playlist_entries(playlist_url: str) -> list[dict]:
         entries = _extract_entries(playlist_url)
         return [e for e in entries if e.get('url')]
     except Exception as e:
-        print(f"Error fetching playlist entries: {e}")
+        get_console().error(f"Error fetching playlist entries: {e}")
         return []
 
 
@@ -154,7 +156,7 @@ def fetch_track_info(url: str) -> dict | None:
         try:
             return ydl.extract_info(url, download=False)
         except Exception as e:
-            print(f"  Warning: Could not fetch track info: {e}")
+            get_console().warn(f"  Warning: Could not fetch track info: {e}")
     return None
 
 
@@ -214,6 +216,8 @@ def download_track(url: str, output_dir: Path, archive_path: Path, codec: str, p
     Returns:
         Path to audio file (downloaded or existing), or None if failed
     """
+    console = get_console()
+
     # Quality mapping: opus gets best quality, aac gets medium to avoid bloat
     quality = '0' if codec == 'opus' else '2'
     
@@ -293,10 +297,10 @@ def download_track(url: str, output_dir: Path, archive_path: Path, codec: str, p
             pass
         
         def warning(self, msg):
-            print(f"  Warning: {msg}")
+            console.warn(f"  Warning: {msg}")
         
         def error(self, msg):
-            print(f"  Error: {msg}")
+            console.error(f"  Error: {msg}")
     
     def postprocessor_hook(d):
         nonlocal downloaded_file
@@ -317,27 +321,27 @@ def download_track(url: str, output_dir: Path, archive_path: Path, codec: str, p
                 return downloaded_file
             # If no download happened (skipped/archived), try to find existing file
             if expected_path and expected_path.exists():
-                print("  (already exists)")
+                console.info("  (already exists)")
                 return expected_path
             # Fallback: glob for file with matching upload_date prefix
             if expected_dir and expected_dir.exists() and upload_date:
                 pattern = f"{upload_date} - *"
                 matches = list(expected_dir.glob(pattern))
                 if matches:
-                    print(f"  (found existing: {matches[0].name})")
+                    console.info(f"  (found existing: {matches[0].name})")
                     return matches[0]
                 else:
-                    print(f"  (no matching file found for {upload_date})")
+                    console.warn(f"  (no matching file found for {upload_date})")
         except yt_dlp.utils.DownloadError as e:
             if 'already been recorded' in str(e) or 'has already been downloaded' in str(e).lower():
-                print("  (already in archive)")
+                console.info("  (already in archive)")
                 # Return expected path if file exists (for LRC generation)
                 if expected_path and expected_path.exists():
                     return expected_path
             else:
-                print(f"  Download error: {e}")
+                console.error(f"  Download error: {e}")
         except Exception as e:
-            print(f"  Unexpected error: {e}")
+            console.error(f"  Unexpected error: {e}")
     
     return None
 
@@ -352,18 +356,18 @@ def download_playlist(playlist_url: str, playlist_title: str, output_dir: Path, 
     
     Returns list of paths to successfully downloaded audio files.
     """
-    print(f"\n{'='*60}")
-    print(f"Playlist: {playlist_title}")
-    print(f"URL: {playlist_url}")
-    print(f"{'='*60}")
+    console = get_console()
+    console.rule(f"Playlist: {playlist_title}")
+    console.print(f"URL: {playlist_url}")
     
     entries = get_playlist_entries(playlist_url)
     
     if not entries:
-        print("No tracks found in playlist")
+        console.warn("No tracks found in playlist")
         return []
     
-    print(f"Found {len(entries)} tracks\n")
+    console.info(f"Found {len(entries)} tracks")
+    console.print()
     
     downloaded_files = []
     
@@ -377,37 +381,37 @@ def download_playlist(playlist_url: str, playlist_title: str, output_dir: Path, 
         info = fetch_track_info(url)
         title = info.get('title', 'Unknown') if info else 'Unknown'
         if _is_older_than(info, since_date):
-            print(f"[{i}/{len(entries)}] {title}")
-            print("  Skipping (before --since date)")
+            console.print(f"[{i}/{len(entries)}] {title}")
+            console.warn("  Skipping (before --since date)")
             continue
         
         codec = extract_codec_from_info(info) if to_mp3 else 'unknown'
         
-        print(f"[{i}/{len(entries)}] {title}")
+        console.print(f"[{i}/{len(entries)}] {title}")
         if to_mp3:
             quality_desc = "best (opus source)" if codec == 'opus' else "medium (aac source)"
-            print(f"  Codec: {codec} → MP3 quality: {quality_desc}")
+            console.print(f"  Codec: {codec} → MP3 quality: {quality_desc}")
         else:
-            print("  Audio: keeping original audio")
+            console.print("  Audio: keeping original audio")
         
         # Download with appropriate settings
         audio_path = download_track(url, output_dir, archive_path, codec, playlist_title, info, to_mp3=to_mp3)
         
         if audio_path and audio_path.exists():
             downloaded_files.append(audio_path)
-            print(f"  ✓ Ready: {audio_path}")
+            console.success(f"  ✓ Ready: {audio_path}")
             
             # Generate LRC / embed lyrics
             if embed_lyrics or write_lrc:
-                print("  Processing tracklist...")
+                console.info("  Processing tracklist...")
                 try:
                     process_audio_with_url(audio_path, url, embed=embed_lyrics, write_file=write_lrc)
                 except Exception as e:
-                    print(f"  Tracklist error: {e}")
+                    console.error(f"  Tracklist error: {e}")
         
         processed += 1
         if limit and processed >= limit:
-            print(f"Reached --limit {limit}; stopping")
+            console.warn(f"Reached --limit {limit}; stopping")
             break
     
     return downloaded_files
@@ -417,20 +421,20 @@ def generate_lrc_files(mp3_files: list[Path]) -> None:
     """
     Generate LRC files for downloaded MP3s using mixcloud_match_to_lrc.
     """
+    console = get_console()
     if not mp3_files:
-        print("\nNo MP3 files to generate LRC for.")
+        console.warn("No MP3 files to generate LRC for.")
         return
     
-    print(f"\n{'='*60}")
-    print(f"Generating LRC files for {len(mp3_files)} track(s)...")
-    print(f"{'='*60}\n")
+    console.rule(f"Generating LRC files for {len(mp3_files)} track(s)")
+    console.print()
     
     for mp3_path in mp3_files:
-        print(f"Processing: {mp3_path.name}")
+        console.info(f"Processing: {mp3_path.name}")
         try:
             process_mp3(mp3_path)
         except Exception as e:
-            print(f"  LRC error: {e}")
+            console.error(f"  LRC error: {e}")
 
 
 def main():
@@ -469,14 +473,19 @@ Transcoding (optional):
                         help='Only download uploads on/after this date (YYYY-MM-DD)')
     parser.add_argument('--dry-run', action='store_true',
                         help='List playlists without downloading')
+    parser.add_argument('--no-color', action='store_true',
+                        help='Disable colored output')
     
     args = parser.parse_args()
-    
-    print(f"Mixcloud Downloader")
-    print(f"Account: {args.username}")
-    print(f"Output: {args.output.absolute()}")
-    print(f"Archive: {args.archive}")
-    print()
+
+    configure_console(no_color=args.no_color)
+    console = get_console()
+
+    console.rule("Mixcloud Downloader")
+    console.print(f"Account: {args.username}")
+    console.print(f"Output: {args.output.absolute()}")
+    console.print(f"Archive: {args.archive}")
+    console.print()
     
     since_date = _parse_since_date(args.since)
     
@@ -489,42 +498,55 @@ Transcoding (optional):
     processed_uploads = 0
     
     if args.playlists:
-        print("Fetching playlists...")
+        console.info("Fetching playlists...")
         playlists = get_user_playlists(args.username)
         
         if not playlists:
-            print(f"No playlists found for user: {args.username}")
-            print("Check that the username is correct and the account has public playlists.")
+            console.error(f"No playlists found for user: {args.username}")
+            console.print("Check that the username is correct and the account has public playlists.")
             sys.exit(1)
         
-        print(f"Found {len(playlists)} playlists:\n")
-        for i, pl in enumerate(playlists, 1):
-            print(f"  {i}. {pl['title']}")
+        console.info(f"Found {len(playlists)} playlists")
+        playlist_rows = [(i, pl['title']) for i, pl in enumerate(playlists, 1)]
+        console.table("Playlists", ["No", "Title"], playlist_rows)
         
         if args.dry_run:
             total_shown = 0
-            for playlist in playlists:
+            rows = []
+            for i, playlist in enumerate(playlists, 1):
                 if args.limit is not None and total_shown >= args.limit:
                     break
+                console.info(f"Scanning playlist {i}/{len(playlists)}: {playlist['title']}")
                 entries = get_playlist_entries(playlist['url'])
                 if not entries:
+                    console.warn("  No tracks found in playlist")
                     continue
-                print(f"\nPlaylist: {playlist['title']}")
+                if since_date:
+                    console.info(f"  Applying --since {since_date}")
+                processed_entries = 0
+                matched_entries = 0
                 for entry in entries:
                     if args.limit is not None and total_shown >= args.limit:
                         break
                     url = entry.get('url')
                     if not url:
                         continue
+                    processed_entries += 1
                     info = fetch_track_info(url)
                     title = info.get('title', entry.get('title', 'Unknown')) if info else entry.get('title', 'Unknown')
                     if _is_older_than(info, since_date):
                         continue
                     total_shown += 1
-                    print(f"  {total_shown}. {title}")
+                    matched_entries += 1
+                    rows.append((total_shown, playlist['title'], title))
+                console.info(f"  Matched {matched_entries} of {processed_entries} tracks")
+            if rows:
+                console.table("Dry Run Tracks", ["No", "Playlist", "Title"], rows)
+            else:
+                console.warn("No tracks matched dry run filters")
             if args.limit is not None and total_shown >= args.limit:
-                print(f"\n(Reached --limit {args.limit} for dry run)")
-            print("\n(Dry run - no downloads performed)")
+                console.warn(f"Reached --limit {args.limit} for dry run")
+            console.info("Dry run - no downloads performed")
             sys.exit(0)
         
         for playlist in playlists:
@@ -546,18 +568,21 @@ Transcoding (optional):
             )
             all_downloaded.extend(downloaded)
     else:
-        print("Fetching uploads...")
+        console.info("Fetching uploads...")
         uploads = get_user_uploads(args.username)
         
         if not uploads:
-            print(f"No uploads found for user: {args.username}")
-            print("Check that the username is correct and the account has public uploads.")
+            console.error(f"No uploads found for user: {args.username}")
+            console.print("Check that the username is correct and the account has public uploads.")
             sys.exit(1)
         
-        print(f"Found {len(uploads)} uploads")
+        console.info(f"Found {len(uploads)} uploads")
         
         if args.dry_run:
             shown = 0
+            rows = []
+            if since_date:
+                console.info(f"Applying --since {since_date}")
             for i, up in enumerate(uploads, 1):
                 if args.limit is not None and shown >= args.limit:
                     break
@@ -569,10 +594,16 @@ Transcoding (optional):
                     if _is_older_than(info, since_date):
                         continue
                 shown += 1
-                print(f"  {shown}. {up['title']}")
+                rows.append((shown, up['title']))
+                if shown % 25 == 0:
+                    console.info(f"Matched {shown} uploads so far")
+            if rows:
+                console.table("Dry Run Uploads", ["No", "Title"], rows)
+            else:
+                console.warn("No uploads matched dry run filters")
             if args.limit is not None and shown >= args.limit:
-                print(f"\n(Reached --limit {args.limit} for dry run)")
-            print("\n(Dry run - no downloads performed)")
+                console.warn(f"Reached --limit {args.limit} for dry run")
+            console.info("Dry run - no downloads performed")
             sys.exit(0)
         
         processed = 0
@@ -584,52 +615,51 @@ Transcoding (optional):
             info = fetch_track_info(url)
             title = info.get('title', up['title']) if info else up['title']
             if _is_older_than(info, since_date):
-                print(f"[{i}/{len(uploads)}] {title}")
-                print("  Skipping (before --since date)")
+                console.print(f"[{i}/{len(uploads)}] {title}")
+                console.warn("  Skipping (before --since date)")
                 continue
             
             codec = extract_codec_from_info(info) if to_mp3 else 'unknown'
             
-            print(f"[{i}/{len(uploads)}] {title}")
+            console.print(f"[{i}/{len(uploads)}] {title}")
             if to_mp3:
                 quality_desc = "best (opus source)" if codec == 'opus' else "medium (aac source)"
-                print(f"  Codec: {codec} → MP3 quality: {quality_desc}")
+                console.print(f"  Codec: {codec} → MP3 quality: {quality_desc}")
             else:
-                print("  Audio: keeping original audio")
+                console.print("  Audio: keeping original audio")
             
             audio_path = download_track(url, args.output, args.archive, codec, "Uploads", info, to_mp3=to_mp3)
             
             if audio_path and audio_path.exists():
                 all_downloaded.append(audio_path)
-                print(f"  ✓ Ready: {audio_path}")
+                console.success(f"  ✓ Ready: {audio_path}")
                 
                 if embed_lyrics or write_lrc:
-                    print("  Processing tracklist...")
+                    console.info("  Processing tracklist...")
                     try:
                         process_audio_with_url(audio_path, url, embed=embed_lyrics, write_file=write_lrc)
                     except Exception as e:
-                        print(f"  Tracklist error: {e}")
+                        console.error(f"  Tracklist error: {e}")
             
             processed += 1
             processed_uploads = processed
             if args.limit and processed >= args.limit:
-                print(f"Reached --limit {args.limit}; stopping")
+                console.warn(f"Reached --limit {args.limit}; stopping")
                 break
     
     # Summary
-    print(f"\n{'='*60}")
-    print("Download Complete!")
-    print(f"{'='*60}")
+    summary_rows = []
     if args.playlists:
-        print(f"Playlists processed: {len(playlists)}")
+        summary_rows.append(("Playlists processed", str(len(playlists))))
     else:
-        print(f"Uploads processed:   {processed_uploads}")
-    print(f"Tracks downloaded: {len(all_downloaded)}")
+        summary_rows.append(("Uploads processed", str(processed_uploads)))
+    summary_rows.append(("Tracks downloaded", str(len(all_downloaded))))
     if embed_lyrics:
-        print("Lyrics embedded when supported; .lrc written for other formats")
+        summary_rows.append(("Lyrics", "Embedded when supported; .lrc written for other formats"))
     if write_lrc:
-        print(f"LRC files written to disk")
-    print(f"Archive file: {args.archive}")
+        summary_rows.append(("LRC files", "Written to disk"))
+    summary_rows.append(("Archive file", str(args.archive)))
+    console.summary_table("Download Complete", summary_rows)
 
 
 if __name__ == "__main__":

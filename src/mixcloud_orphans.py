@@ -26,12 +26,14 @@ try:
         fetch_user_uploads,
         fetch_playlist_items,
     )
+    from .console import configure_console, get_console
 except ImportError:
     from mixcloud_common import (
         fetch_user_playlists,
         fetch_user_uploads,
         fetch_playlist_items,
     )
+    from console import configure_console, get_console
 
 
 def find_orphan_tracks(username: str) -> tuple[list[dict], list[dict], set[str]] | None:
@@ -47,29 +49,30 @@ def find_orphan_tracks(username: str) -> tuple[list[dict], list[dict], set[str]]
         - orphan_tracks: List of upload dicts not in any playlist
         - playlist_slugs: Set of slugs that are in playlists
     """
-    print(f"Fetching playlists for {username}...")
+    console = get_console()
+    console.info(f"Fetching playlists for {username}...")
     playlists = fetch_user_playlists(username)
     if playlists is None:
         return None
-    print(f"  Found {len(playlists)} playlists")
+    console.info(f"  Found {len(playlists)} playlists")
     
     # Collect all tracks from all playlists
     playlist_slugs = set()
     for i, playlist in enumerate(playlists, 1):
-        print(f"  [{i}/{len(playlists)}] Fetching items from '{playlist['name']}'...")
+        console.print(f"  [{i}/{len(playlists)}] Fetching items from '{playlist['name']}'...")
         items = fetch_playlist_items(username, playlist['slug'])
         if items:
             for item in items:
                 playlist_slugs.add(item['slug'])
     
-    print(f"  Total tracks in playlists: {len(playlist_slugs)}")
+    console.info(f"  Total tracks in playlists: {len(playlist_slugs)}")
     
     # Get all uploads
-    print(f"\nFetching all uploads for {username}...")
+    console.info(f"Fetching all uploads for {username}...")
     all_uploads = fetch_user_uploads(username)
     if all_uploads is None:
         return None
-    print(f"  Found {len(all_uploads)} uploads")
+    console.info(f"  Found {len(all_uploads)} uploads")
     
     # Find orphans (uploads not in any playlist)
     orphan_tracks = [
@@ -106,49 +109,51 @@ Examples:
                         help='Skip embedding lyrics in MP3 USLT tag')
     parser.add_argument('--write-lrc', action='store_true',
                         help='Write separate .lrc files (default: embed only)')
+    parser.add_argument('--no-color', action='store_true',
+                        help='Disable colored output')
     
     args = parser.parse_args()
-    
-    print(f"Mixcloud Orphan Track Finder")
-    print(f"Account: {args.username}")
-    print()
+
+    configure_console(no_color=args.no_color)
+    console = get_console()
+    console.rule("Mixcloud Orphan Track Finder")
+    console.print(f"Account: {args.username}")
+    console.print()
     
     result = find_orphan_tracks(args.username)
     if result is None:
-        print("Error fetching data from Mixcloud")
+        console.error("Error fetching data from Mixcloud")
         sys.exit(1)
     
     all_uploads, orphan_tracks, playlist_slugs = result
     
     # Summary
-    print(f"\n{'='*60}")
-    print("Summary")
-    print(f"{'='*60}")
-    print(f"Total uploads: {len(all_uploads)}")
-    print(f"In playlists:  {len(playlist_slugs)}")
-    print(f"Orphans:       {len(orphan_tracks)}")
+    console.summary_table(
+        "Summary",
+        [
+            ("Total uploads", str(len(all_uploads))),
+            ("In playlists", str(len(playlist_slugs))),
+            ("Orphans", str(len(orphan_tracks))),
+        ],
+    )
     
     if not orphan_tracks:
-        print("\nNo orphan tracks found - all uploads are in playlists!")
+        console.info("No orphan tracks found - all uploads are in playlists!")
         sys.exit(0)
     
     # List orphans
-    print(f"\n{'='*60}")
-    print("Orphan Tracks")
-    print(f"{'='*60}")
+    orphan_rows = []
     for i, track in enumerate(orphan_tracks, 1):
-        print(f"  {i:3d}. {track['name']}")
         url = track.get('url') or f"https://www.mixcloud.com/{track.get('owner_username') or args.username}/{track['slug']}/"
-        print(f"       {url}")
+        orphan_rows.append((i, track['name'], url))
+    console.table("Orphan Tracks", ["No", "Title", "URL"], orphan_rows)
     
     if not args.download:
-        print(f"\nUse --download to download these {len(orphan_tracks)} tracks")
+        console.info(f"Use --download to download these {len(orphan_tracks)} tracks")
         sys.exit(0)
     
     # Download orphan tracks
-    print(f"\n{'='*60}")
-    print("Downloading Orphan Tracks")
-    print(f"{'='*60}")
+    console.rule("Downloading Orphan Tracks")
     
     # Import downloader functions
     try:
@@ -176,37 +181,39 @@ Examples:
         title = info.get('title', track['name']) if info else track['name']
         codec = extract_codec_from_info(info) if args.to_mp3 else 'unknown'
         
-        print(f"\n[{i}/{len(orphan_tracks)}] {title}")
+        console.print(f"[{i}/{len(orphan_tracks)}] {title}")
         if args.to_mp3:
             quality_desc = "best (opus source)" if codec == 'opus' else "medium (aac source)"
-            print(f"  Codec: {codec} → MP3 quality: {quality_desc}")
+            console.print(f"  Codec: {codec} → MP3 quality: {quality_desc}")
         else:
-            print("  Audio: keeping original audio")
+            console.print("  Audio: keeping original audio")
         
         # Download with "Orphans" as playlist name
         mp3_path = download_track(url, args.output, args.archive, codec, "Orphans", info, to_mp3=args.to_mp3)
         
         if mp3_path and mp3_path.exists():
             downloaded_files.append(mp3_path)
-            print(f"  ✓ Ready: {mp3_path}")
+            console.success(f"  ✓ Ready: {mp3_path}")
             
             # Process tracklist (embed/write LRC)
             embed_lyrics = not args.no_embed
             write_lrc = args.write_lrc
             if embed_lyrics or write_lrc:
-                print("  Processing tracklist...")
+                console.info("  Processing tracklist...")
                 try:
                     process_audio_with_url(mp3_path, url, embed=embed_lyrics, write_file=write_lrc)
                 except Exception as e:
-                    print(f"  Tracklist error: {e}")
+                    console.error(f"  Tracklist error: {e}")
     
     # Final summary
-    print(f"\n{'='*60}")
-    print("Download Complete!")
-    print(f"{'='*60}")
-    print(f"Orphan tracks found: {len(orphan_tracks)}")
-    print(f"Tracks downloaded:   {len(downloaded_files)}")
-    print(f"Archive file:        {args.archive}")
+    console.summary_table(
+        "Download Complete",
+        [
+            ("Orphan tracks found", str(len(orphan_tracks))),
+            ("Tracks downloaded", str(len(downloaded_files))),
+            ("Archive file", str(args.archive)),
+        ],
+    )
 
 
 if __name__ == "__main__":
