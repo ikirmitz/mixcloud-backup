@@ -1,8 +1,8 @@
-# mixcloud-lrc Technical Reference
+# mixcloud-backup Technical Reference
 
 ## Overview
 
-`mixcloud-lrc` is a Python toolkit for backing up Mixcloud accounts and generating navigation files. It includes:
+`mixcloud-backup` is a Python toolkit for backing up Mixcloud accounts and generating navigation files. It includes:
 
 1. **Automated Downloader** (`mixcloud_downloader.py`) - Downloads all uploads by default (or playlists with `--playlists`) using yt-dlp with intelligent quality selection when transcoding
 2. **LRC Generator** (`mixcloud_match_to_lrc.py`) - Fetches Mixcloud tracklists and embeds them as lyrics tags in MP3/M4A/Opus files
@@ -14,7 +14,7 @@
 ## Project Structure
 
 ```
-mixcloud-lrc/
+mixcloud-backup/
 ├── src/
 │   ├── mixcloud_common.py          # Shared utilities (API, URL parsing)
 │   ├── mixcloud_downloader.py      # Automated playlist downloader

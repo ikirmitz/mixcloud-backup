@@ -25,9 +25,9 @@ def _env_flag(name: str) -> bool:
 def _resolve_color_setting(force_color: bool | None) -> bool | None:
     if force_color is not None:
         return force_color
-    if _env_flag("MIXCLOUD_LRC_NO_COLOR"):
+    if _env_flag("MIXCLOUD_BACKUP_NO_COLOR"):
         return False
-    if _env_flag("MIXCLOUD_LRC_COLOR"):
+    if _env_flag("MIXCLOUD_BACKUP_COLOR"):
         return True
     return None
 

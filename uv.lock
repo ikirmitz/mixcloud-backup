@@ -117,7 +117,7 @@ wheels = [
 ]
 
 [[package]]
-name = "mixcloud-lrc"
+name = "mixcloud-backup"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

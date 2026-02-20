@@ -1,4 +1,4 @@
-# mixcloud-lrc
+# mixcloud-backup
 
 A toolkit for backing up your Mixcloud account — downloads uploads with optimal quality, and adds tracklist navigation to audio files via embedded lyrics tags or `.lrc` files.
 
@@ -115,8 +115,24 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 git clone <repository-url>
-cd mixcloud-lrc
+cd mixcloud-backup
 uv sync
+```
+
+## Developer Setup & Testing
+
+To install developer and test dependencies (such as pytest), use the `dev` extra group:
+
+```bash
+uv sync --extra dev
+```
+
+To run the test suite:
+
+```bash
+uv run pytest
+```
+
 ```
 
 ## How the Tracklist Works

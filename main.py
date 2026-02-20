@@ -1,5 +1,5 @@
 def main():
-    print("Hello from mixcloud-lrc!")
+    print("Hello from mixcloud-backup!")
 
 
 if __name__ == "__main__":
