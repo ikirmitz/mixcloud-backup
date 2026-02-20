@@ -2,6 +2,54 @@
 
 A toolkit for backing up your Mixcloud account — downloads uploads with optimal quality, and adds tracklist navigation to audio files via embedded lyrics tags or `.lrc` files.
 
+## Table of Contents
+
+- [mixcloud-backup](#mixcloud-backup)
+  - [Table of Contents](#table-of-contents)
+  - [Installation](#installation)
+  - [Quick Start](#quick-start)
+  - [Tools](#tools)
+    - [1. Downloader](#1-downloader)
+    - [2. Orphan Track Finder](#2-orphan-track-finder)
+    - [3. Tracklist Generator](#3-tracklist-generator)
+    - [4. LRC Embedder](#4-lrc-embedder)
+  - [How Tracklists Work](#how-tracklists-work)
+  - [Troubleshooting](#troubleshooting)
+    - ["Skipping (no Mixcloud URL in tags)"](#skipping-no-mixcloud-url-in-tags)
+    - ["Skipping (bad Mixcloud URL format)"](#skipping-bad-mixcloud-url-format)
+    - ["Skipping (only X section(s))"](#skipping-only-x-sections)
+    - ["Skipping (no timing information)"](#skipping-no-timing-information)
+  - [Limitations](#limitations)
+  - [Developer Setup](#developer-setup)
+  - [Technical Details](#technical-details)
+  - [Legal \& License](#legal--license)
+    - [Legal Disclaimer](#legal-disclaimer)
+    - [License](#license)
+
+## Installation
+
+Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+
+```bash
+git clone <repository-url>
+cd mixcloud-backup
+uv sync
+```
+
+## Quick Start
+
+Download all uploads from a Mixcloud account:
+
+```bash
+uv run python src/mixcloud_downloader.py USERNAME
+```
+
+Download by playlist instead:
+
+```bash
+uv run python src/mixcloud_downloader.py USERNAME --playlists
+```
+
 ## Tools
 
 ### 1. Downloader
@@ -109,17 +157,7 @@ uv run python src/embed_lrc.py /path/to/your/music
 
 No Mixcloud API access needed — this is a purely local operation.
 
-## Installation
-
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
-
-```bash
-git clone <repository-url>
-cd mixcloud-backup
-uv sync
-```
-
-## How the Tracklist Works
+## How Tracklists Work
 
 Tracklists are stored in [LRC format](https://en.wikipedia.org/wiki/LRC_(file_format)) — timestamped text that media players can display for chapter/track navigation:
 
@@ -161,29 +199,7 @@ The API didn't provide timestamps and the audio duration couldn't be read.
 - No retry logic for network failures
 - WebM containers do not support embedded lyrics tags here; `.lrc` is used instead
 
-## Legal Disclaimer
-
-**For Personal Use Only**: This tool is intended for backing up your own Mixcloud content or content you have permission to download. Users are solely responsible for ensuring their use complies with:
-
-- Mixcloud's Terms of Service
-- Copyright laws in their jurisdiction
-- Rights of content creators and copyright holders
-
-**No Warranty**: This software is provided "as is" without warranty of any kind. Downloaded content may be subject to copyright protection. The authors and contributors are not responsible for any misuse of this tool.
-
-**Respect Content Creators**: Please support artists and DJs by streaming their content on Mixcloud when possible. This tool is meant for personal archival purposes, not for redistribution or commercial use.
-
-## License
-
-This project is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0) - see the [LICENSE](LICENSE) file for details.
-
-**Commercial use is prohibited.** 
-
-## Technical Details
-
-For developers and LLMs: See [agents.md](agents.md) for detailed technical documentation including API schemas, function signatures, validation rules, and modification points.
-
-## Developer Setup & Testing
+## Developer Setup
 
 To install developer and test dependencies (such as pytest), use the `dev` extra group:
 
@@ -196,3 +212,27 @@ To run the test suite:
 ```bash
 uv run pytest
 ```
+
+## Technical Details
+
+For developers and LLMs: See [agents.md](agents.md) for detailed technical documentation including API schemas, function signatures, validation rules, and modification points.
+
+## Legal & License
+
+### Legal Disclaimer
+
+**For Personal Use Only**: This tool is intended for backing up your own Mixcloud content or content you have permission to download. Users are solely responsible for ensuring their use complies with:
+
+- Mixcloud's Terms of Service
+- Copyright laws in their jurisdiction
+- Rights of content creators and copyright holders
+
+**No Warranty**: This software is provided "as is" without warranty of any kind. Downloaded content may be subject to copyright protection. The authors and contributors are not responsible for any misuse of this tool.
+
+**Respect Content Creators**: Please support artists and DJs by streaming their content on Mixcloud when possible. This tool is meant for personal archival purposes, not for redistribution or commercial use.
+
+### License
+
+This project is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0) - see the [LICENSE](LICENSE) file for details.
+
+**Commercial use is prohibited.**
