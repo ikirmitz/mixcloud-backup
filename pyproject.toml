@@ -1,7 +1,7 @@
 [project]
-name = "mixcloud-lrc"
+name = "mixcloud-backup"
 version = "0.1.0"
-description = "Add your description here"
+description = "Backup your entire Mixcloud account—including uploads, playlists, and orphaned tracks—and generate navigation-friendly LRC files for chapter/track navigation in any media player. mixcloud-backup automates high-quality downloads, embeds tracklists as lyrics, and helps you organize your Mixcloud audio library with ease."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
