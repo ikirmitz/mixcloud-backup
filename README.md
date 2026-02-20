@@ -119,22 +119,6 @@ cd mixcloud-backup
 uv sync
 ```
 
-## Developer Setup & Testing
-
-To install developer and test dependencies (such as pytest), use the `dev` extra group:
-
-```bash
-uv sync --extra dev
-```
-
-To run the test suite:
-
-```bash
-uv run pytest
-```
-
-```
-
 ## How the Tracklist Works
 
 Tracklists are stored in [LRC format](https://en.wikipedia.org/wiki/LRC_(file_format)) — timestamped text that media players can display for chapter/track navigation:
@@ -180,3 +164,17 @@ The API didn't provide timestamps and the audio duration couldn't be read.
 ## Technical Details
 
 For developers and LLMs: See [agents.md](agents.md) for detailed technical documentation including API schemas, function signatures, validation rules, and modification points.
+
+## Developer Setup & Testing
+
+To install developer and test dependencies (such as pytest), use the `dev` extra group:
+
+```bash
+uv sync --extra dev
+```
+
+To run the test suite:
+
+```bash
+uv run pytest
+```
